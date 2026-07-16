@@ -20,37 +20,27 @@ const statusText = document.getElementById('status');
 
 btnConnect.addEventListener('click', async () => {
     try {
-        statusText.innerText = "Recherche du compteur...";
+        statusText.innerText = "Recherche BLE en cours...";
         
-        // Demande l'accès au compteur via les protocoles standards du vélo
+        // On demande tous les appareils en spécifiant les services de base du vélo
         const device = await navigator.bluetooth.requestDevice({
-            filters: [
-                { services: ['location_and_navigation', 'cycling_speed_and_cadence'] }
+            acceptAllDevices: true,
+            optionalServices: [
+                '00001819-0000-1000-8000-00805f9b34fb', // Service de navigation/vitesse standard
+                'cycling_speed_and_cadence',
+                'device_information'
             ]
         });
 
-        statusText.innerText = `Connexion à ${device.name}...`;
+        statusText.innerText = `Tentative de connexion à : ${device.name}...`;
+        
+        // Connexion
         const server = await device.gatt.connect();
+        statusText.innerText = `Succès ! Connecté à ${device.name}`;
         
-        // On demande le service de navigation (GPS)
-        const service = await server.getPrimaryService('location_and_navigation');
-        const characteristic = await service.getCharacteristic('ln_location_and_speed');
-
-        // Écouter les données envoyées par le compteur en continu
-        await characteristic.startNotifications();
-        characteristic.addEventListener('characteristicvaluechanged', handleGpsData);
-        
-        statusText.innerText = `Connecté en direct à ${device.name} !`;
-        btnConnect.style.display = 'none'; // Cache le bouton une fois connecté
-
-        // Bloquer la mise en veille de l'écran (si le téléphone reste sur le guidon)
-        if ('wakeLock' in navigator) {
-            await navigator.wakeLock.request('screen');
-        }
-
     } catch (error) {
-        console.error(error);
-        statusText.innerText = "Erreur ou connexion annulée.";
+        console.error("Erreur détaillée : ", error);
+        statusText.innerText = "Erreur : " + error.message;
     }
 });
 
