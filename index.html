@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LiveTrack Vélo</title>
+    <link rel="manifest" href="manifest.json">
+    <!-- Style pour la carte Leaflet -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        body { font-family: Arial, sans-serif; margin: 0; padding: 0; display: flex; flex-direction: column; height: 100vh; }
+        #header { background: #10b981; color: white; padding: 15px; text-align: center; z-index: 1000; }
+        button { background: white; color: #10b981; border: none; padding: 10px 20px; font-weight: bold; border-radius: 5px; cursor: pointer; margin-top: 10px; }
+        #map { flex-grow: 1; width: 100%; }
+        .status { font-size: 0.9em; margin-top: 5px; color: #d1fae5; }
+    </style>
+</head>
+<body>
+
+    <div id="header">
+        <h2>Mon LiveTrack Cycliste</h2>
+        <!-- Bouton pour le cycliste -->
+        <button id="btn-connect">Connecter mon compteur Coospo/GPS</button>
+        <div id="status" class="status">Statut : Non connecté</div>
+    </div>
+
+    <!-- La carte affichée pour tout le monde -->
+    <div id="map"></div>
+
+    <!-- Inclusion de la carte et du script logique -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>
