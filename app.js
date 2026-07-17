@@ -73,8 +73,8 @@ btnConnect.addEventListener('click', async () => {
         const server = await device.gatt.connect();
         
         // Connexion au flux GPS
-        const service = await server.getPrimaryService('location_and_navigation');
-        const characteristic = await service.getCharacteristic(0x2A67);
+        const service = await server.getPrimaryService('00001819-0000-1000-8000-00805f9b34fb'); 
+		const characteristic = await service.getCharacteristic('00002a67-0000-1000-8000-00805f9b34fb');
 
         await characteristic.startNotifications();
         characteristic.addEventListener('characteristicvaluechanged', handleGpsData);
