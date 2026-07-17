@@ -12,14 +12,14 @@ const firebaseConfig = {
   measurementId: "G-PQ9MQX0DQ5"
 };
 
-// Initialisation de Firebase
 const app = initializeApp(firebaseConfig);
 const db = getDatabase(app);
 
-// ID unique de votre trajet. Vous pouvez le changer pour créer différentes sessions.
-const rideId = "ma_sortie_velo_1"; 
+// Variables de gestion de session
+let rideId = "";
+let firebaseListener = null;
 
-// 2. Initialisation de la carte Leaflet
+// Initialisation de la carte Leaflet
 const map = L.map('map').setView([46.2276, 2.2137], 6); // Centré sur la France
 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
     attribution: '© OpenStreetMap'
@@ -28,43 +28,84 @@ L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
 let marker = null;
 let path = L.polyline([], { color: '#10b981', weight: 5 }).addTo(map);
 
-// 3. Écoute en temps réel de la base de données (Pour l'affichage sur la carte)
-// Dès qu'une nouvelle coordonnée est envoyée à Firebase, la carte se met à jour
-onValue(ref(db, `rides/${rideId}`), (snapshot) => {
-    const data = snapshot.val();
-    if (data) {
-        const { lat, lng } = data;
-        const coords = [lat, lng];
-        
-        if (!marker) {
-            marker = L.marker(coords).addTo(map);
-            map.setView(coords, 16); // Zoom sur le cycliste au démarrage
-        } else {
-            marker.setLatLng(coords);
-        }
-        path.addLatLng(coords);
-    }
-});
+// --- GESTION DES SESSIONS DYNAMIQUES ---
 
-// 4. Gestion de la PWA et du Service Worker
-if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('sw.js')
-        .then(() => console.log("Service Worker OK"))
-        .catch(err => console.error(err));
+function initialiserSession() {
+    // Vérifie si un proche ouvre un lien de partage (ex: ?ride=Thomas_171589139)
+    const urlParams = new URLSearchParams(window.location.search);
+    const sessionDemandee = urlParams.get('ride');
+
+    if (sessionDemandee) {
+        rideId = sessionDemandee;
+        // Mode Spectateur : On masque le bandeau de contrôle du cycliste
+        document.getElementById('header').style.display = 'none'; 
+        ecouterFirebase();
+    } else {
+        // Mode Cycliste : On crée une session locale par défaut
+        definirNouvelleSession();
+    }
 }
 
-// 5. Connexion Bluetooth (Pour le cycliste)
+function definirNouvelleSession() {
+    const rawName = document.getElementById('username').value.trim();
+    const cleanName = rawName.replace(/\s+/g, '_') || "Cycliste";
+    const timestamp = Date.now();
+    
+    // Génération de l'ID unique de session
+    rideId = `${cleanName}_${timestamp}`;
+    
+    // Nettoyer la carte et basculer sur la nouvelle écoute
+    resetCarte();
+    ecouterFirebase();
+    
+    document.getElementById('status').innerText = "Prêt. En attente de connexion au compteur...";
+}
+
+function resetCarte() {
+    if (marker) {
+        map.removeLayer(marker);
+        marker = null;
+    }
+    path.setLatLngs([]);
+}
+
+function ecouterFirebase() {
+    // On nettoie l'écouteur précédent si existant
+    if (firebaseListener) {
+        off(ref(db, `rides/${rideId}`));
+    }
+
+    // Écoute en temps réel de la position stockée
+    firebaseListener = onValue(ref(db, `rides/${rideId}`), (snapshot) => {
+        const data = snapshot.val();
+        if (data) {
+            const { lat, lng } = data;
+            const coords = [lat, lng];
+            
+            if (!marker) {
+                marker = L.marker(coords).addTo(map);
+                map.setView(coords, 16); // Centre et zoom sur le cycliste au premier point
+            } else {
+                marker.setLatLng(coords);
+            }
+            path.addLatLng(coords);
+        }
+    });
+}
+
+// --- CONNEXION BLUETOOTH COMPTEUR GPS ---
+
 const btnConnect = document.getElementById('btn-connect');
 const statusText = document.getElementById('status');
 
 btnConnect.addEventListener('click', async () => {
     try {
-        statusText.innerText = "Recherche de votre compteur...";
+        statusText.innerText = "Recherche de votre compteur GPS (BLE)...";
         
         const device = await navigator.bluetooth.requestDevice({
             acceptAllDevices: true,
             optionalServices: [
-                '00001819-0000-1000-8000-00805f9b34fb', // Service de navigation standard
+                '00001819-0000-1000-8000-00805f9b34fb', // Service de Localisation et Navigation
                 'cycling_speed_and_cadence'
             ]
         });
@@ -72,16 +113,20 @@ btnConnect.addEventListener('click', async () => {
         statusText.innerText = `Connexion à ${device.name}...`;
         const server = await device.gatt.connect();
         
-        // Connexion au flux GPS
+        statusText.innerText = "Configuration des flux de navigation...";
+        
+        // Utilisation des UUIDs complets officiels sur 128 bits (Requis pour Garmin)
         const service = await server.getPrimaryService('00001819-0000-1000-8000-00805f9b34fb'); 
-		const characteristic = await service.getCharacteristic('00002a67-0000-1000-8000-00805f9b34fb');
+        const characteristic = await service.getCharacteristic('00002a67-0000-1000-8000-00805f9b34fb'); // Location and Speed
 
+        // Lancement de l'écoute des notifications du compteur
         await characteristic.startNotifications();
         characteristic.addEventListener('characteristicvaluechanged', handleGpsData);
         
-        statusText.innerText = `Connecté à ${device.name} ! Le suivi est actif.`;
+        statusText.innerText = `Connecté à ${device.name} ! Activez le GPS et faites 'START'`;
         btnConnect.style.display = 'none';
 
+        // Maintien de l'écran allumé si l'application reste visible
         if ('wakeLock' in navigator) {
             await navigator.wakeLock.request('screen');
         }
@@ -92,35 +137,47 @@ btnConnect.addEventListener('click', async () => {
     }
 });
 
-// 6. Extraction des données GPS Bluetooth
+// --- DECODAGE DES DONNEES GPS DU COMPTEUR ---
+
 function handleGpsData(event) {
     const value = event.target.value;
     
-    // Test de réception brute (Compte le nombre d'octets reçus)
-    console.log("Octets GPS reçus : " + value.byteLength);
-    
+    // Lecture des champs Latitude (octets 2-5) et Longitude (octets 6-9) au format Int32 standard BLE
     const latRaw = value.getInt32(2, true); 
     const lngRaw = value.getInt32(6, true);
     
+    // Conversion des dix-millionièmes de degrés en degrés décimaux
     const latitude = latRaw / 10000000;
     const longitude = lngRaw / 10000000;
 
-    // Affiche directement les coordonnées sur l'application du téléphone
-    if (latitude && longitude && latitude !== 0) {
-        document.getElementById('status').innerText = `📡 GPS Garmin OK : ${latitude.toFixed(5)}, ${longitude.toFixed(5)}`;
-        envoyerAuServeur(latitude, longitude);
+    // Validation et envoi des données
+    if (latitude && longitude && latitude !== 0 && longitude !== 0) {
+        statusText.innerText = `📡 GPS OK : ${latitude.toFixed(5)}, ${longitude.toFixed(5)}`;
+        
+        // Pousse la coordonnée dans Firebase
+        set(ref(db, `rides/${rideId}`), {
+            lat: latitude,
+            lng: longitude,
+            timestamp: Date.now()
+        }).catch(err => console.error("Erreur Firebase : ", err));
     } else {
-        document.getElementById('status').innerText = "Edge connecté | En attente de signal GPS valide...";
+        statusText.innerText = "Compteur connecté | En attente d'un signal GPS valide à l'extérieur...";
     }
 }
 
-// 7. Envoi direct vers Firebase Realtime Database
-function envoyerAuServeur(lat, lng) {
-    set(ref(db, `rides/${rideId}`), {
-        lat: lat,
-        lng: lng,
-        timestamp: Date.now()
-    })
-    .then(() => console.log("Position envoyée à Firebase !"))
-    .catch(err => console.error("Erreur d'envoi Firebase : ", err));
+// Action de réinitialisation de sortie
+document.getElementById('btn-reset').addEventListener('click', () => {
+    if (confirm("Voulez-vous clôturer cette sortie et en démarrer une nouvelle ?")) {
+        definirNouvelleSession();
+        const shareUrl = `${window.location.origin}${window.location.pathname}?ride=${rideId}`;
+        alert("Envoyez ce lien à vos proches pour qu'ils vous suivent :\n\n" + shareUrl);
+    }
+});
+
+// Enregistrement du Service Worker
+if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('sw.js').catch(err => console.error(err));
 }
+
+// Initialisation globale au chargement de la page
+initialiserSession();
