@@ -105,7 +105,7 @@ btnConnect.addEventListener('click', async () => {
         const device = await navigator.bluetooth.requestDevice({
             acceptAllDevices: true,
             optionalServices: [
-                '00001819-0000-1000-8000-00805f9b34fb', // Service de Localisation et Navigation
+                '00001819-0000-1000-8000-00805f9b34fb', // Localisation
                 'cycling_speed_and_cadence'
             ]
         });
@@ -113,20 +113,29 @@ btnConnect.addEventListener('click', async () => {
         statusText.innerText = `Connexion à ${device.name}...`;
         const server = await device.gatt.connect();
         
-        statusText.innerText = "Configuration des flux de navigation...";
+        statusText.innerText = "Configuration du flux Garmin...";
         
-        // Utilisation des UUIDs complets officiels sur 128 bits (Requis pour Garmin)
         const service = await server.getPrimaryService('00001819-0000-1000-8000-00805f9b34fb'); 
-        const characteristic = await service.getCharacteristic('00002a67-0000-1000-8000-00805f9b34fb'); // Location and Speed
+        const characteristic = await service.getCharacteristic('00002a67-0000-1000-8000-00805f9b34fb');
 
-        // Lancement de l'écoute des notifications du compteur
+        // --- CORRECTION MAJEURE FORCÉE POUR GARMIN ---
+        // On force l'activation des notifications en écrivant le bit standard [1, 0] 
+        // dans le descripteur de configuration de la caractéristique (CCCD)
         await characteristic.startNotifications();
         characteristic.addEventListener('characteristicvaluechanged', handleGpsData);
         
-        statusText.innerText = `Connecté à ${device.name} ! Activez le GPS et faites 'START'`;
+        try {
+            const descriptor = await characteristic.getDescriptor('00002902-0000-1000-8000-00805f9b34fb');
+            await descriptor.writeValue(new Uint8Array([1, 0]));
+            console.log("Descripteur de notification forcé avec succès !");
+        } catch (descError) {
+            console.log("Le descripteur est déjà géré par le navigateur : " + descError.message);
+        }
+        // ---------------------------------------------
+
+        statusText.innerText = `Connecté à ${device.name} ! Lancez l'activité (START) dehors.`;
         btnConnect.style.display = 'none';
 
-        // Maintien de l'écran allumé si l'application reste visible
         if ('wakeLock' in navigator) {
             await navigator.wakeLock.request('screen');
         }
