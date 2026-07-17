@@ -96,22 +96,21 @@ btnConnect.addEventListener('click', async () => {
 function handleGpsData(event) {
     const value = event.target.value;
     
-    try {
-        // Lecture de la latitude (octets 2 à 5) et longitude (octets 6 à 9) selon la norme BLE
-        const latRaw = value.getInt32(2, true); 
-        const lngRaw = value.getInt32(6, true);
-        
-        const latitude = latRaw / 10000000;
-        const longitude = lngRaw / 10000000;
+    // Test de réception brute (Compte le nombre d'octets reçus)
+    console.log("Octets GPS reçus : " + value.byteLength);
+    
+    const latRaw = value.getInt32(2, true); 
+    const lngRaw = value.getInt32(6, true);
+    
+    const latitude = latRaw / 10000000;
+    const longitude = lngRaw / 10000000;
 
-        // Écriture du diagnostic sur l'écran du téléphone pour vos tests :
-        document.getElementById('status').innerText = `GPS reçu : ${latitude.toFixed(4)}, ${longitude.toFixed(4)}`;
-
-        if (latitude && longitude && latitude !== 0) {
-            envoyerAuServeur(latitude, longitude);
-        }
-    } catch (err) {
-        document.getElementById('status').innerText = "Erreur lecture GPS : " + err.message;
+    // Affiche directement les coordonnées sur l'application du téléphone
+    if (latitude && longitude && latitude !== 0) {
+        document.getElementById('status').innerText = `📡 GPS Garmin OK : ${latitude.toFixed(5)}, ${longitude.toFixed(5)}`;
+        envoyerAuServeur(latitude, longitude);
+    } else {
+        document.getElementById('status').innerText = "Edge connecté | En attente de signal GPS valide...";
     }
 }
 
