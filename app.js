@@ -74,7 +74,7 @@ btnConnect.addEventListener('click', async () => {
         
         // Connexion au flux GPS
         const service = await server.getPrimaryService('location_and_navigation');
-        const characteristic = await service.getCharacteristic('ln_location_and_speed');
+        const characteristic = await service.getCharacteristic(0x2A67);
 
         await characteristic.startNotifications();
         characteristic.addEventListener('characteristicvaluechanged', handleGpsData);
@@ -96,15 +96,22 @@ btnConnect.addEventListener('click', async () => {
 function handleGpsData(event) {
     const value = event.target.value;
     
-    // Décodage standard Bluetooth (latitude / longitude)
-    const latRaw = value.getInt32(2, true); 
-    const lngRaw = value.getInt32(6, true);
-    
-    const latitude = latRaw / 10000000;
-    const longitude = lngRaw / 10000000;
+    try {
+        // Lecture de la latitude (octets 2 à 5) et longitude (octets 6 à 9) selon la norme BLE
+        const latRaw = value.getInt32(2, true); 
+        const lngRaw = value.getInt32(6, true);
+        
+        const latitude = latRaw / 10000000;
+        const longitude = lngRaw / 10000000;
 
-    if (latitude && longitude && latitude !== 0) {
-        envoyerAuServeur(latitude, longitude);
+        // Écriture du diagnostic sur l'écran du téléphone pour vos tests :
+        document.getElementById('status').innerText = `GPS reçu : ${latitude.toFixed(4)}, ${longitude.toFixed(4)}`;
+
+        if (latitude && longitude && latitude !== 0) {
+            envoyerAuServeur(latitude, longitude);
+        }
+    } catch (err) {
+        document.getElementById('status').innerText = "Erreur lecture GPS : " + err.message;
     }
 }
 
