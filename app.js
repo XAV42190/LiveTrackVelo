@@ -10,6 +10,7 @@ let commentsInterval = null; // Stocke le timer des commentaires
 let localPath = [];
 let wakeLock = null;
 let displayedCommentIds = new Set(); // Évite d'afficher deux fois le même commentaire
+let currentPhotoBase64 = null; // Stocke la photo sélectionnée/compressée
 
 // Détection de la session et du rôle (Spectateur vs Cycliste)
 const urlParams = new URLSearchParams(window.location.search);
@@ -55,7 +56,7 @@ window.addEventListener('DOMContentLoaded', () => {
         debugLog("CYCLISTE : Prêt (Session " + activeSessionId + ")");
     }
 
-    // === ICI : Chargement initial et écoute périodique des commentaires ===
+    // === Chargement initial et écoute périodique des commentaires ===
     fetchCommentsFromFirebase();
     commentsInterval = setInterval(fetchCommentsFromFirebase, 4000);
 
@@ -192,29 +193,131 @@ function fetchCommentsFromFirebase() {
         .catch(err => console.log("Erreur chargement commentaires: ", err));
 }
 
-// --- AFFICHAGE SUR LA CARTE ---
+// --- AFFICHAGE SUR LA CARTE (AVEC PHOTO) ---
 function addCommentToMap(comment) {
-    if (!comment || !comment.lat || !comment.lng) return;
+    if (!comment || comment.lat === undefined || comment.lng === undefined) return;
 
     const timeStr = comment.timestamp 
         ? new Date(comment.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
         : '';
 
+    const hasPhoto = Boolean(comment.photo);
+    const badge = hasPhoto ? '📸 ' : '💬 ';
+
     const commentIcon = L.divIcon({
         className: 'custom-comment-icon',
         html: `<div style="background-color: #FFC107; color: black; padding: 4px 8px; border-radius: 12px; font-weight: bold; font-size: 12px; border: 2px solid white; box-shadow: 0 2px 5px rgba(0,0,0,0.3); white-space: nowrap;">
-                💬 ${comment.text}
+                ${badge}${comment.text || 'Photo'}
                </div>`,
-        iconSize: [100, 30],
-        iconAnchor: [50, 15]
+        iconSize: [110, 30],
+        iconAnchor: [55, 15]
     });
 
-    const commentMarker = L.marker([comment.lat, comment.lng], { icon: commentIcon }).addTo(map);
-    commentMarker.bindPopup(`<b>Commentaire (${timeStr}) :</b><br>${comment.text}`);
+    const commentMarker = L.marker([comment.lat, comment.lng], { 
+        icon: commentIcon,
+        zIndexOffset: 1000 
+    }).addTo(map);
+
+    // Contenu de la Pop-up
+    let popupContent = `<div style="text-align:center; min-width: 120px;"><b>Message (${timeStr}) :</b><br>${comment.text || ''}`;
+    
+    if (hasPhoto) {
+        popupContent += `<br><a href="${comment.photo}" target="_blank">
+          <img src="${comment.photo}" style="max-width:200px; max-height:200px; border-radius:8px; margin-top:8px; border: 1px solid #ccc; object-fit: cover;" />
+        </a>`;
+    }
+    popupContent += `</div>`;
+
+    commentMarker.bindPopup(popupContent);
 }
 
 // ==========================================
-// 5. CONTRÔLE GPS & ENVOI (CYCLISTE)
+// 5. GESTION DES PHOTOS ET COMMENTAIRES (CYCLISTE)
+// ==========================================
+function handlePhotoSelection(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = function(event) {
+        const img = new Image();
+        img.onload = function() {
+            const canvas = document.createElement('canvas');
+            const MAX_WIDTH = 600; // Recadrage max pour optimiser l'envoi
+            let width = img.width;
+            let height = img.height;
+
+            if (width > MAX_WIDTH) {
+                height *= MAX_WIDTH / width;
+                width = MAX_WIDTH;
+            }
+
+            canvas.width = width;
+            canvas.height = height;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(img, 0, 0, width, height);
+
+            // Compression JPEG (Qualité 0.6)
+            currentPhotoBase64 = canvas.toDataURL('image/jpeg', 0.6);
+
+            const btnPhoto = document.getElementById('btn-photo');
+            if (btnPhoto) btnPhoto.style.backgroundColor = '#10b981'; // Vert = photo prête
+        };
+        img.src = event.target.result;
+    };
+    reader.readAsDataURL(file);
+}
+
+async function sendComment() {
+    const input = document.getElementById('comment-input');
+    const text = input ? input.value.trim() : '';
+
+    if (!text && !currentPhotoBase64) {
+        alert("Veuillez saisir un texte ou prendre une photo.");
+        return;
+    }
+
+    if (!localPath || localPath.length === 0) {
+        alert("Position GPS non disponible. Attendez le premier signal GPS.");
+        return;
+    }
+
+    const lastPos = localPath[localPath.length - 1];
+
+    const commentData = {
+        text: text,
+        photo: currentPhotoBase64 || null,
+        timestamp: Date.now(),
+        lat: lastPos[0],
+        lng: lastPos[1]
+    };
+
+    try {
+        const response = await fetch(`${FIREBASE_DB_URL}/livetrack/sessions/${activeSessionId}/comments.json`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(commentData)
+        });
+
+        if (response.ok) {
+            if (input) input.value = '';
+            currentPhotoBase64 = null;
+
+            const btnPhoto = document.getElementById('btn-photo');
+            if (btnPhoto) btnPhoto.style.backgroundColor = '#64748b';
+
+            showToast("💬 Envoyé !");
+        } else {
+            alert("Erreur lors de l'envoi vers Firebase.");
+        }
+    } catch (err) {
+        console.error("Erreur envoi commentaire :", err);
+        alert("Erreur d'envoi : " + err.message);
+    }
+}
+
+// ==========================================
+// 6. CONTRÔLE GPS & ENVOI (CYCLISTE)
 // ==========================================
 function startTracking() {
     if (!navigator.geolocation) {
@@ -366,7 +469,7 @@ function togglePocketMode() {
 }
 
 // ==========================================
-// 6. DÉCLENCHEURS DES BOUTONS
+// 7. DÉCLENCHEURS DES BOUTONS
 // ==========================================
 function setupEventListeners() {
     const startBtn = document.getElementById('startBtn');
@@ -375,10 +478,20 @@ function setupEventListeners() {
     const pocketBtn = document.getElementById('pocketBtn');
     const blackOverlay = document.getElementById('blackOverlay');
 
+    const btnAddComment = document.getElementById('btn-add-comment');
+    const btnPhoto = document.getElementById('btn-photo');
+    const commentPhotoInput = document.getElementById('comment-photo');
+
     if (startBtn) startBtn.addEventListener('click', startTracking);
     if (stopBtn) stopBtn.addEventListener('click', stopTracking);
     if (shareBtn) shareBtn.addEventListener('click', shareTrackingLink);
     
     if (pocketBtn) pocketBtn.addEventListener('click', togglePocketMode);
     if (blackOverlay) blackOverlay.addEventListener('click', togglePocketMode);
+
+    if (btnAddComment) btnAddComment.addEventListener('click', sendComment);
+    if (btnPhoto && commentPhotoInput) {
+        btnPhoto.addEventListener('click', () => commentPhotoInput.click());
+        commentPhotoInput.addEventListener('change', handlePhotoSelection);
+    }
 }
