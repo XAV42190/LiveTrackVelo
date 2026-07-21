@@ -11,14 +11,14 @@ if (!sessionId) {
     localStorage.setItem('livetrack_session_id', sessionId);
 }
 
-// Mode Spectateur
+// Détection du mode Spectateur (?session=... dans l'URL)
 const urlParams = new URLSearchParams(window.location.search);
 const sharedSessionId = urlParams.get('session');
 const isViewer = Boolean(sharedSessionId);
 const activeSessionId = isViewer ? sharedSessionId : sessionId;
 
 window.addEventListener('DOMContentLoaded', () => {
-    // Mode spectateur : on masque les boutons
+    // Mode spectateur : on masque les boutons de contrôle
     if (isViewer) {
         const controls = document.querySelector('.controls');
         if (controls) controls.style.display = 'none';
@@ -32,13 +32,13 @@ window.addEventListener('DOMContentLoaded', () => {
         attribution: '© OpenStreetMap'
     }).addTo(map);
 
-    // Tracé rouge bien épais pour être ultra visible
+    // Ligne rouge très visible
     polyline = L.polyline([], { color: '#ff0000', weight: 6, opacity: 0.9 }).addTo(map);
 
     setTimeout(() => { map.invalidateSize(); }, 300);
 });
 
-// Affichage d'un bandeau de débogage à l'écran
+// Bandeau de débogage en bas de l'écran
 function debugLog(msg) {
     let debugBox = document.getElementById('debugBox');
     if (!debugBox) {
@@ -49,7 +49,6 @@ function debugLog(msg) {
     }
     debugBox.innerText = msg;
 }
-
 // ==========================================
 // 2. INITIALISATION FIREBASE & SYNCHRO
 // ==========================================
@@ -71,43 +70,56 @@ try {
     if (typeof firebase !== 'undefined' && firebaseConfig.databaseURL !== "VOS_VRAIES_INFOS_FIREBASE") {
         firebase.initializeApp(firebaseConfig);
         database = firebase.database();
+        
+        // Emplacement de la session
         sessionRef = database.ref('livetrack/sessions/' + activeSessionId);
 
-        debugLog("Firebase connecté. Session: " + activeSessionId);
+        debugLog("Connecté (" + (isViewer ? "Invité" : "Cycliste") + ") ID: " + activeSessionId);
 
-        // RÉCEPTION EN TEMPS RÉEL (Méthode par événement de point)
-        sessionRef.child('pts').on('child_added', (snapshot) => {
-            const pt = snapshot.val();
-            if (pt && pt.lat && pt.lng) {
-                const newPos = [pt.lat, pt.lng];
-                
-                // Ajouter le point à la ligne
-                polyline.addLatLng(newPos);
-                
-                // Placer ou déplacer le marqueur
-                if (!marker) {
-                    marker = L.marker(newPos).addTo(map);
-                    map.setView(newPos, 16);
-                } else {
-                    marker.setLatLng(newPos);
-                    if (isViewer) map.panTo(newPos);
+        // --- ÉCOUTE TOTALE EN TEMPS RÉEL VIA 'VALUE' ---
+        sessionRef.on('value', (snapshot) => {
+            const data = snapshot.val();
+            
+            if (!data) {
+                debugLog("Session en attente de données...");
+                return;
+            }
+
+            // Récupération des points
+            if (data.pts) {
+                const rawPoints = Object.values(data.pts); // Convertit l'objet Firebase en tableau
+                const coords = rawPoints.map(p => [p.lat, p.lng]);
+
+                // Mise à jour de la ligne du tracé
+                polyline.setLatLngs(coords);
+
+                // Récupération du dernier point pour positionner le marqueur
+                const lastPoint = coords[coords.length - 1];
+                if (lastPoint) {
+                    if (!marker) {
+                        marker = L.marker(lastPoint).addTo(map);
+                        map.setView(lastPoint, 16);
+                    } else {
+                        marker.setLatLng(lastPoint);
+                        if (isViewer) map.panTo(lastPoint); // La carte suit automatiquement chez l'invité
+                    }
                 }
 
-                debugLog("Point reçu (" + polyline.getLatLngs().length + " pts): " + pt.lat.toFixed(4) + ", " + pt.lng.toFixed(4));
+                debugLog("Tracé à jour: " + coords.length + " points reçus.");
             }
         }, (err) => {
-            debugLog("Erreur lecture Firebase: " + err.message);
+            debugLog("Erreur de lecture: " + err.message);
         });
 
     } else {
-        debugLog("ERREUR : Clés Firebase non configurées !");
+        debugLog("ERREUR: Clés Firebase absentes.");
     }
 } catch (e) {
-    debugLog("Exception Firebase: " + e.message);
+    debugLog("Exception Init: " + e.message);
 }
 
 // ==========================================
-// 3. SUIVI GPS (CYCLISTE)
+// 3. CONTRÔLE GPS (CYCLISTE)
 // ==========================================
 
 function startTracking() {
@@ -116,15 +128,16 @@ function startTracking() {
         return;
     }
 
-    // Réinitialisation locale et Firebase
+    // Réinitialisation locale
     if (polyline) polyline.setLatLngs([]);
     if (marker) {
         map.removeLayer(marker);
         marker = null;
     }
 
+    // Réinitialisation Firebase pour repartir sur une session propre
     if (sessionRef) {
-        sessionRef.remove(); // Supprime l'ancienne session
+        sessionRef.remove();
     }
 
     const startBtn = document.getElementById('startBtn');
@@ -135,16 +148,16 @@ function startTracking() {
     stopBtn.disabled = false;
     stopBtn.style.opacity = '1';
 
-    debugLog("Démarrage du GPS...");
+    debugLog("Recherche GPS...");
 
     watchId = navigator.geolocation.watchPosition(
         (position) => {
             const lat = position.coords.latitude;
             const lng = position.coords.longitude;
 
-            debugLog("GPS OK: " + lat.toFixed(4) + ", " + lng.toFixed(4));
+            debugLog("GPS local: " + lat.toFixed(4) + ", " + lng.toFixed(4));
 
-            // Envoi du point unique à Firebase
+            // Envoi à Firebase sous le nœud 'pts'
             if (sessionRef) {
                 sessionRef.child('pts').push({
                     lat: lat,
@@ -182,7 +195,7 @@ function stopTracking() {
 }
 
 // ==========================================
-// 4. PARTAGE
+// 4. FONCTION DE PARTAGE
 // ==========================================
 
 function shareTrackingLink() {
@@ -198,7 +211,7 @@ function shareTrackingLink() {
         navigator.share(shareData).catch(() => {});
     } else {
         navigator.clipboard.writeText(shareUrl).then(() => {
-            showToast("Lien copié !");
+            showToast("Lien invité copié !");
         }).catch(() => {
             alert("Erreur de copie.");
         });
