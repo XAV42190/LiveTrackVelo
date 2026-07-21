@@ -24,8 +24,24 @@
         <!-- Saisie du prénom/nom -->
         <input type="text" id="username" placeholder="Votre prénom ou nom" value="Cycliste_Anonyme">
         <br>
-        <button id="btn-start">Démarrer le LiveTrack (GPS)</button>
-        <button id="btn-reset">Nouvelle Sortie</button>
+        <div class="controls" style="margin: 15px 0; display: flex; gap: 10px; flex-wrap: wrap;">
+    <button id="startBtn" onclick="startTracking()" style="padding: 10px 15px; background-color: #28a745; color: white; border: none; border-radius: 5px; font-weight: bold; cursor: pointer;">
+        ▶ Démarrer le LiveTrack
+    </button>
+    
+    <button id="stopBtn" onclick="stopTracking()" disabled style="padding: 10px 15px; background-color: #dc3545; color: white; border: none; border-radius: 5px; font-weight: bold; cursor: pointer; opacity: 0.6;">
+        ⏹ Arrêter le suivi
+    </button>
+    
+    <button id="shareBtn" onclick="shareTrackingLink()" style="padding: 10px 15px; background-color: #007bff; color: white; border: none; border-radius: 5px; font-weight: bold; cursor: pointer;">
+        🔗 Partager le lien
+    </button>
+</div>
+
+<!-- Notification temporaire lors de la copie du lien (à placer juste en dessous des boutons) -->
+<div id="toast" style="display:none; position:fixed; bottom:20px; left:50%; transform:translateX(-50%); background:#333; color:#fff; padding:10px 20px; border-radius:8px; z-index:1000; font-family: sans-serif;">
+    Lien copié dans le presse-papier !
+</div>
 
         <div id="status" class="status">Statut : Prêt à démarrer</div>
     </div>
