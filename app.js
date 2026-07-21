@@ -7,8 +7,9 @@ let map, marker, polyline;
 let watchId = null;
 let viewerInterval = null;
 let localPath = [];
+let wakeLock = null;
 
-// Détection de la session et du rôle
+// Détection de la session et du rôle (Spectateur vs Cycliste)
 const urlParams = new URLSearchParams(window.location.search);
 const sharedSessionId = urlParams.get('session');
 const isViewer = Boolean(sharedSessionId);
@@ -22,14 +23,16 @@ if (!sessionId) {
 const activeSessionId = isViewer ? sharedSessionId : sessionId;
 
 // ==========================================
-// 2. INITIALISATION CARTE
+// 2. INITIALISATION CARTE & APPLICATION
 // ==========================================
 window.addEventListener('DOMContentLoaded', () => {
+    // Si c'est un spectateur, masquer les boutons de contrôle
     if (isViewer) {
         const controls = document.querySelector('.controls');
         if (controls) controls.style.display = 'none';
     }
 
+    // Initialisation de Leaflet
     map = L.map('map').setView([46.603354, 1.888334], 6);
 
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -41,7 +44,7 @@ window.addEventListener('DOMContentLoaded', () => {
 
     setTimeout(() => { map.invalidateSize(); }, 300);
 
-    // Si spectateur : lancer la récupération automatique via HTTP toutes les 3 secondes
+    // Mode Spectateur vs Cycliste
     if (isViewer) {
         debugLog("SPECTATEUR : Connexion à la session " + activeSessionId);
         fetchPointsFromFirebase();
@@ -51,6 +54,7 @@ window.addEventListener('DOMContentLoaded', () => {
     }
 });
 
+// Affiche un bandeau d'information visuel pour le suivi
 function debugLog(msg) {
     let debugBox = document.getElementById('debugBox');
     if (!debugBox) {
@@ -63,7 +67,49 @@ function debugLog(msg) {
 }
 
 // ==========================================
-// 3. REQUÊTES FIREBASE REST (SPECTATEUR)
+// 3. GESTION DE L'ANTI-VEILLE ET AUDIO
+// ==========================================
+
+// Empêche la mise en veille du système / processeur via Audio
+function startSilentAudio() {
+    const audio = document.getElementById('silentAudio');
+    if (audio) {
+        audio.play().then(() => {
+            debugLog("Audio silencieux actif 🎧 (Anti-veille JS)");
+        }).catch(err => {
+            console.log("Erreur lecture audio:", err);
+        });
+    }
+}
+
+function stopSilentAudio() {
+    const audio = document.getElementById('silentAudio');
+    if (audio) {
+        audio.pause();
+        audio.currentTime = 0;
+    }
+}
+
+// Empêche l'écran de s'éteindre (si supporté par le navigateur)
+async function requestWakeLock() {
+    try {
+        if ('wakeLock' in navigator) {
+            wakeLock = await navigator.wakeLock.request('screen');
+        }
+    } catch (err) {
+        console.log("Wake Lock indisponible:", err);
+    }
+}
+
+function releaseWakeLock() {
+    if (wakeLock !== null) {
+        wakeLock.release();
+        wakeLock = null;
+    }
+}
+
+// ==========================================
+// 4. REQUÊTES FIREBASE REST (SPECTATEUR)
 // ==========================================
 function fetchPointsFromFirebase() {
     const url = `${FIREBASE_DB_URL}/livetrack/sessions/${activeSessionId}/pts.json`;
@@ -100,14 +146,19 @@ function fetchPointsFromFirebase() {
 }
 
 // ==========================================
-// 4. CONTRÔLE GPS & ENVOI (CYCLISTE)
+// 5. CONTRÔLE GPS & ENVOI (CYCLISTE)
 // ==========================================
 function startTracking() {
     if (!navigator.geolocation) {
-        alert("GPS non supporté.");
+        alert("GPS non supporté par ce navigateur.");
         return;
     }
 
+    // 1. Activer les dispositifs anti-mise en veille
+    startSilentAudio();
+    requestWakeLock();
+
+    // 2. Réinitialisation des traces locales
     localPath = [];
     if (polyline) polyline.setLatLngs([]);
     if (marker) {
@@ -115,11 +166,12 @@ function startTracking() {
         marker = null;
     }
 
-    // Supprimer la session précédente dans Firebase
+    // 3. Effacer la session précédente dans Firebase pour repartir à zéro
     fetch(`${FIREBASE_DB_URL}/livetrack/sessions/${activeSessionId}.json`, {
         method: 'DELETE'
     });
 
+    // 4. Gestion de l'état des boutons
     const startBtn = document.getElementById('startBtn');
     const stopBtn = document.getElementById('stopBtn');
     
@@ -128,14 +180,15 @@ function startTracking() {
     stopBtn.disabled = false;
     stopBtn.style.opacity = '1';
 
-    debugLog("Recherche signal GPS...");
+    debugLog("Recherche du signal GPS...");
 
+    // 5. Lancement de la géolocalisation continue
     watchId = navigator.geolocation.watchPosition(
         (position) => {
             const lat = position.coords.latitude;
             const lng = position.coords.longitude;
 
-            // 1. Affichage local
+            // Affichage carte locale
             localPath.push([lat, lng]);
             polyline.setLatLngs(localPath);
 
@@ -147,9 +200,9 @@ function startTracking() {
                 map.panTo([lat, lng]);
             }
 
-            debugLog("CYCLISTE : " + localPath.length + " pts envoyés (" + lat.toFixed(4) + ", " + lng.toFixed(4) + ")");
+            debugLog("CYCLISTE : " + localPath.length + " pts | " + lat.toFixed(4) + ", " + lng.toFixed(4));
 
-            // 2. Envoi direct via HTTP POST à Firebase
+            // Envoi HTTP POST direct à Firebase REST
             fetch(`${FIREBASE_DB_URL}/livetrack/sessions/${activeSessionId}/pts.json`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -173,9 +226,15 @@ function startTracking() {
 
 function stopTracking() {
     if (watchId !== null) {
+        // Arrêter le suivi GPS
         navigator.geolocation.clearWatch(watchId);
         watchId = null;
 
+        // Désactiver l'anti-veille audio et écran
+        stopSilentAudio();
+        releaseWakeLock();
+
+        // Rétablir les boutons
         const startBtn = document.getElementById('startBtn');
         const stopBtn = document.getElementById('stopBtn');
         
@@ -189,7 +248,7 @@ function stopTracking() {
 }
 
 // ==========================================
-// 5. PARTAGE
+// 6. FONCTION DE PARTAGE DE LIEN
 // ==========================================
 function shareTrackingLink() {
     const shareUrl = window.location.origin + window.location.pathname + '?session=' + sessionId;
@@ -206,7 +265,7 @@ function shareTrackingLink() {
         navigator.clipboard.writeText(shareUrl).then(() => {
             showToast("Lien invité copié !");
         }).catch(() => {
-            alert("Erreur de copie.");
+            alert("Erreur lors de la copie du lien.");
         });
     }
 }
