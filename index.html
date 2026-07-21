@@ -4,7 +4,10 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>LiveTrack Vélo</title>
-    
+    <!-- Manifest PWA -->
+    <link rel="manifest" href="manifest.json">
+    <!-- Couleur de la barre de statut sur téléphone -->
+    <meta name="theme-color" content="#28a745">
     <!-- Leaflet CSS -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 
@@ -133,5 +136,11 @@
     
     <!-- Application JS -->
     <script src="app.js"></script>
+    <script>
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('sw.js');
+  }
+</script>
+    
 </body>
 </html>
