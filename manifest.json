@@ -3,8 +3,9 @@
   "short_name": "LiveTrack",
   "start_url": "./index.html",
   "display": "standalone",
+  "orientation": "portrait"
   "background_color": "#ffffff",
-  "theme_color": "#10b981",
+  "theme_color": "#007bff",
   "icons": [
     {
       "src": "icon_512.png",
