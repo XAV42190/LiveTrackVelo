@@ -181,7 +181,8 @@ function startTracking() {
     startBtn.style.opacity = '0.5';
     stopBtn.disabled = false;
     stopBtn.style.opacity = '1';
-
+    // Afficher le bouton Mode Poche au démarrage
+    document.getElementById('pocketBtn').style.display = 'inline-block';
     debugLog("Recherche du signal GPS...");
 
     // 6. Lancement de la géolocalisation continue
@@ -245,7 +246,11 @@ function stopTracking() {
         startBtn.style.opacity = '1';
         stopBtn.disabled = true;
         stopBtn.style.opacity = '0.5';
+        // Masquer le bouton Mode Poche à l'arrêt
+        document.getElementById('pocketBtn').style.display = 'none';
 
+        // Si le mode poche était actif, le fermer aussi
+        document.getElementById('blackOverlay').style.display = 'none';
         debugLog("Suivi arrêté.");
     }
 }
