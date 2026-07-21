@@ -65,6 +65,16 @@ function startTracking() {
         return;
     }
 
+    // --- REINITIALISATION DU TRACÉ ET DU MARQUEUR ---
+    if (polyline) {
+        polyline.setLatLngs([]); // Efface la ligne bleue
+    }
+    if (marker) {
+        map.removeLayer(marker); // Supprime l'ancien marqueur de la carte
+        marker = null;           // Remet à zéro pour en récréer un propre au 1er point GPS
+    }
+    // ------------------------------------------------
+
     const startBtn = document.getElementById('startBtn');
     const stopBtn = document.getElementById('stopBtn');
     
