@@ -1,32 +1,35 @@
 // ==========================================
-// 1. INITIALISATION CARTE LEAFLET
+// 1. CONFIGURATION
 // ==========================================
+const FIREBASE_DB_URL = "https://suivisortievelo-default-rtdb.europe-west1.firebasedatabase.app"; 
+
 let map, marker, polyline;
 let watchId = null;
+let viewerInterval = null;
+let localPath = [];
 
-// Détection STRICTE du rôle via l'URL
+// Détection de la session et du rôle
 const urlParams = new URLSearchParams(window.location.search);
 const sharedSessionId = urlParams.get('session');
-const isViewer = Boolean(sharedSessionId); // VRAI uniquement si 'session=' est dans l'URL
+const isViewer = Boolean(sharedSessionId);
 
-// Gestion de l'ID de session
 let sessionId = localStorage.getItem('livetrack_session_id');
 if (!sessionId) {
     sessionId = 'session_' + Math.random().toString(36).substring(2, 9);
     localStorage.setItem('livetrack_session_id', sessionId);
 }
 
-// L'ID actif : si invité -> ID de l'URL, si cycliste -> ID local
 const activeSessionId = isViewer ? sharedSessionId : sessionId;
 
+// ==========================================
+// 2. INITIALISATION CARTE
+// ==========================================
 window.addEventListener('DOMContentLoaded', () => {
-    // Si spectateur : on masque les boutons de contrôle
     if (isViewer) {
         const controls = document.querySelector('.controls');
         if (controls) controls.style.display = 'none';
     }
 
-    // Carte
     map = L.map('map').setView([46.603354, 1.888334], 6);
 
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -37,9 +40,17 @@ window.addEventListener('DOMContentLoaded', () => {
     polyline = L.polyline([], { color: '#ff0000', weight: 6, opacity: 0.9 }).addTo(map);
 
     setTimeout(() => { map.invalidateSize(); }, 300);
+
+    // Si spectateur : lancer la récupération automatique via HTTP toutes les 3 secondes
+    if (isViewer) {
+        debugLog("SPECTATEUR : Connexion à la session " + activeSessionId);
+        fetchPointsFromFirebase();
+        viewerInterval = setInterval(fetchPointsFromFirebase, 3000);
+    } else {
+        debugLog("CYCLISTE : Prêt (Session " + activeSessionId + ")");
+    }
 });
 
-// Bandeau de débogage
 function debugLog(msg) {
     let debugBox = document.getElementById('debugBox');
     if (!debugBox) {
@@ -52,87 +63,45 @@ function debugLog(msg) {
 }
 
 // ==========================================
-// 2. INITIALISATION FIREBASE & SYNCHRO
+// 3. REQUÊTES FIREBASE REST (SPECTATEUR)
 // ==========================================
-let database = null;
-let locationRef = null;
+function fetchPointsFromFirebase() {
+    const url = `${FIREBASE_DB_URL}/livetrack/sessions/${activeSessionId}/pts.json`;
 
-// Remplacez par vos clés issues de la console Firebase
-const firebaseConfig = {
-  apiKey: "AIzaSyBE-6F7c2rF-f5DQDv3D9Wiu9l1eiNbY0s",
-  authDomain: "suivisortievelo.firebaseapp.com",
-  projectId: "suivisortievelo",
-  storageBucket: "suivisortievelo.firebasestorage.app",
-  messagingSenderId: "286724342837",
-  appId: "1:286724342837:web:89c3838de2393123f31d7c",
-  measurementId: "G-PQ9MQX0DQ5"
-};
-
-try {
-    if (typeof firebase !== 'undefined' && firebaseConfig.databaseURL !== "VOS_VRAIES_INFOS_FIREBASE") {
-        firebase.initializeApp(firebaseConfig);
-        
-        firebase.auth().signInAnonymously().then(() => {
-            database = firebase.database();
-            sessionRef = database.ref('livetrack/sessions/' + activeSessionId);
-
-            if (isViewer) {
-                debugLog("Mode SPECTATEUR connecté - ID: " + activeSessionId);
-                startListening(); // L'invité écoute les points
-            } else {
-                debugLog("Mode CYCLISTE prêt - ID: " + activeSessionId);
+    fetch(url)
+        .then(response => response.json())
+        .then(data => {
+            if (!data) {
+                debugLog("SPECTATEUR : En attente du départ du vélo...");
+                return;
             }
-        }).catch((err) => {
-            debugLog("Erreur Auth: " + err.message);
+
+            const rawPoints = Object.values(data);
+            const coords = rawPoints.map(p => [p.lat, p.lng]);
+
+            polyline.setLatLngs(coords);
+
+            const lastPoint = coords[coords.length - 1];
+            if (lastPoint) {
+                if (!marker) {
+                    marker = L.marker(lastPoint).addTo(map);
+                    map.setView(lastPoint, 16);
+                } else {
+                    marker.setLatLng(lastPoint);
+                    map.panTo(lastPoint);
+                }
+            }
+
+            debugLog("SPECTATEUR : " + coords.length + " points affichés sur la carte !");
+        })
+        .catch(err => {
+            debugLog("Erreur Réseau Spectateur: " + err.message);
         });
-
-    } else {
-        debugLog("ERREUR: Clés Firebase non renseignées.");
-    }
-} catch (e) {
-    debugLog("Exception Init: " + e.message);
-}
-
-// ÉCOUTEUR (EXCLUSIF SPECTATEUR)
-function startListening() {
-    if (!sessionRef) return;
-
-    sessionRef.child('pts').on('value', (snapshot) => {
-        const data = snapshot.val();
-        
-        if (!data) {
-            debugLog("Spectateur : En attente du démarrage du parcours...");
-            return;
-        }
-
-        const rawPoints = Object.values(data);
-        const coords = rawPoints.map(p => [p.lat, p.lng]);
-
-        // Mise à jour carte
-        polyline.setLatLngs(coords);
-
-        const lastPoint = coords[coords.length - 1];
-        if (lastPoint) {
-            if (!marker) {
-                marker = L.marker(lastPoint).addTo(map);
-                map.setView(lastPoint, 16);
-            } else {
-                marker.setLatLng(lastPoint);
-                map.panTo(lastPoint);
-            }
-        }
-
-        debugLog("SPECTATEUR : " + coords.length + " points reçus en direct !");
-    }, (err) => {
-        debugLog("Erreur Synchro: " + err.message);
-    });
 }
 
 // ==========================================
-// 3. CONTRÔLE GPS (CYCLISTE UNIQUEMENT)
+// 4. CONTRÔLE GPS & ENVOI (CYCLISTE)
 // ==========================================
-let localPath = [];
-
 function startTracking() {
     if (!navigator.geolocation) {
         alert("GPS non supporté.");
@@ -146,10 +115,10 @@ function startTracking() {
         marker = null;
     }
 
-    // Réinitialiser la base Firebase pour cette session
-    if (sessionRef) {
-        sessionRef.remove();
-    }
+    // Supprimer la session précédente dans Firebase
+    fetch(`${FIREBASE_DB_URL}/livetrack/sessions/${activeSessionId}.json`, {
+        method: 'DELETE'
+    });
 
     const startBtn = document.getElementById('startBtn');
     const stopBtn = document.getElementById('stopBtn');
@@ -166,7 +135,7 @@ function startTracking() {
             const lat = position.coords.latitude;
             const lng = position.coords.longitude;
 
-            // 1. Mise à jour de la carte DU CYCLISTE en local
+            // 1. Affichage local
             localPath.push([lat, lng]);
             polyline.setLatLngs(localPath);
 
@@ -178,16 +147,18 @@ function startTracking() {
                 map.panTo([lat, lng]);
             }
 
-            debugLog("CYCLISTE : " + localPath.length + " pts envoyés (GPS: " + lat.toFixed(4) + ", " + lng.toFixed(4) + ")");
+            debugLog("CYCLISTE : " + localPath.length + " pts envoyés (" + lat.toFixed(4) + ", " + lng.toFixed(4) + ")");
 
-            // 2. Envoi à Firebase pour les invités
-            if (sessionRef) {
-                sessionRef.child('pts').push({
+            // 2. Envoi direct via HTTP POST à Firebase
+            fetch(`${FIREBASE_DB_URL}/livetrack/sessions/${activeSessionId}/pts.json`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
                     lat: lat,
                     lng: lng,
                     t: Date.now()
-                });
-            }
+                })
+            }).catch(e => debugLog("Erreur Envoi: " + e.message));
         },
         (error) => {
             debugLog("Erreur GPS: " + error.message);
@@ -218,10 +189,9 @@ function stopTracking() {
 }
 
 // ==========================================
-// 4. PARTAGE
+// 5. PARTAGE
 // ==========================================
 function shareTrackingLink() {
-    // Génère l'URL avec le bon paramètre de session
     const shareUrl = window.location.origin + window.location.pathname + '?session=' + sessionId;
 
     const shareData = {
