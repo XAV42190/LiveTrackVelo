@@ -26,7 +26,6 @@
             background-color: #f4f4f9;
         }
 
-        /* Barre d'outils */
         .controls {
             padding: 10px;
             background: #ffffff;
@@ -53,7 +52,6 @@
         #stopBtn { background-color: #dc3545; opacity: 0.5; }
         #shareBtn { background-color: #007bff; }
 
-        /* Conteneur de la carte */
         #map {
             flex: 1;
             width: 100%;
@@ -61,7 +59,6 @@
             background-color: #e5e3df;
         }
 
-        /* Pop-up Toast */
         #toast {
             display: none;
             position: fixed;
@@ -93,12 +90,7 @@
     <!-- Leaflet JS -->
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
-    <!-- Firebase JS (Clean & Compatible avec app.js) -->
-    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-database-compat.js"></script>
-
-    <!-- Application JS -->
+    <!-- Application JS (Ultra-léger sans SDK Firebase) -->
     <script src="./app.js"></script>
 
     <!-- Registration Service Worker -->
