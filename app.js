@@ -3,28 +3,29 @@
 // ==========================================
 let map, marker, polyline;
 let watchId = null;
+let pathCoordinates = []; // Stocke le tracé localement
 
-// Gestion de la session (ID unique pour le partage)
+// Session unique pour le partage
 let sessionId = localStorage.getItem('livetrack_session_id');
 if (!sessionId) {
     sessionId = 'session_' + Math.random().toString(36).substring(2, 9);
     localStorage.setItem('livetrack_session_id', sessionId);
 }
 
-// Vérification si l'utilisateur est un spectateur (présence de ?session= dans l'URL)
+// Détection du mode spectateur (?session=... dans l'URL)
 const urlParams = new URLSearchParams(window.location.search);
 const sharedSessionId = urlParams.get('session');
 const isViewer = Boolean(sharedSessionId);
 const activeSessionId = isViewer ? sharedSessionId : sessionId;
 
 window.addEventListener('DOMContentLoaded', () => {
-    // Si c'est un spectateur, on masque la barre de boutons
+    // Si spectateur : on masque la barre de boutons
     if (isViewer) {
         const controls = document.querySelector('.controls');
         if (controls) controls.style.display = 'none';
     }
 
-    // Création de la carte
+    // Initialisation de la carte
     map = L.map('map').setView([46.603354, 1.888334], 6);
 
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -38,7 +39,7 @@ window.addEventListener('DOMContentLoaded', () => {
 });
 
 // ==========================================
-// 2. INITIALISATION SÉCURISÉE FIREBASE
+// 2. INITIALISATION FIREBASE & SYNCHRO
 // ==========================================
 let database = null;
 let locationRef = null;
@@ -59,24 +60,23 @@ try {
         firebase.initializeApp(firebaseConfig);
         database = firebase.database();
         
-        // Référence dynamique liée à la session courante
+        // Référence vers la session en cours
         locationRef = database.ref('livetrack/sessions/' + activeSessionId);
 
-        // MODE SPECTATEUR : Réception du tracé en temps réel
+        // RÉCEPTION EN TEMPS RÉEL (Surtout pour le spectateur)
         locationRef.on('value', (snapshot) => {
             const data = snapshot.val();
-            if (data) {
-                // Si la session contient un historique de points
-                if (data.history) {
-                    const points = Object.values(data.history);
-                    polyline.setLatLngs(points.map(p => [p.latitude, p.longitude]));
+            if (data && isViewer) {
+                // 1. Mise à jour du tracé complet
+                if (data.path && Array.isArray(data.path)) {
+                    polyline.setLatLngs(data.path);
                 }
                 
-                // Position actuelle
+                // 2. Mise à jour de la position courante du marqueur
                 if (data.currentLocation) {
                     const lat = data.currentLocation.latitude;
                     const lng = data.currentLocation.longitude;
-                    updateMarkerOnly(lat, lng);
+                    updateMarker(lat, lng);
                 }
             }
         });
@@ -86,23 +86,24 @@ try {
 }
 
 // ==========================================
-// 3. CONTRÔLE DU GPS (CYCLISTE)
+// 3. CONTRÔLE GPS (POUR LE CYCLISTE)
 // ==========================================
 
 function startTracking() {
     if (!navigator.geolocation) {
-        alert("GPS non supporté.");
+        alert("GPS non supporté par ce téléphone.");
         return;
     }
 
     // Réinitialisation locale du tracé
+    pathCoordinates = [];
     if (polyline) polyline.setLatLngs([]);
     if (marker) {
         map.removeLayer(marker);
         marker = null;
     }
 
-    // Effacement de l'ancienne session dans Firebase pour repartir à zéro
+    // Effacement des données de l'ancienne session dans Firebase
     if (locationRef) {
         locationRef.remove();
     }
@@ -120,15 +121,22 @@ function startTracking() {
             const lat = position.coords.latitude;
             const lng = position.coords.longitude;
 
-            updateMap(lat, lng);
-            sendLocationToFirebase(lat, lng);
+            // Mettre à jour l'affichage du cycliste
+            const newPos = [lat, lng];
+            pathCoordinates.push(newPos);
+            
+            polyline.setLatLngs(pathCoordinates);
+            updateMarker(lat, lng);
+
+            // Envoyer à Firebase pour les proches
+            sendToFirebase(lat, lng);
         },
         (error) => {
             alert("Erreur GPS : " + error.message);
         },
         {
             enableHighAccuracy: true,
-            maximumAge: 5000,
+            maximumAge: 3000,
             timeout: 10000
         }
     );
@@ -151,15 +159,7 @@ function stopTracking() {
     }
 }
 
-function updateMap(lat, lng) {
-    if (!map) return;
-    const newPos = [lat, lng];
-
-    updateMarkerOnly(lat, lng);
-    polyline.addLatLng(newPos);
-}
-
-function updateMarkerOnly(lat, lng) {
+function updateMarker(lat, lng) {
     const newPos = [lat, lng];
     if (!marker) {
         marker = L.marker(newPos).addTo(map);
@@ -169,18 +169,15 @@ function updateMarkerOnly(lat, lng) {
     }
 }
 
-function sendLocationToFirebase(lat, lng) {
+function sendToFirebase(lat, lng) {
     if (locationRef) {
-        // Enregistre la position actuelle + ajoute au tracé (history)
-        locationRef.child('currentLocation').set({
-            latitude: lat,
-            longitude: lng,
-            timestamp: Date.now()
-        });
-
-        locationRef.child('history').push({
-            latitude: lat,
-            longitude: lng
+        locationRef.set({
+            currentLocation: {
+                latitude: lat,
+                longitude: lng,
+                timestamp: Date.now()
+            },
+            path: pathCoordinates
         });
     }
 }
@@ -190,7 +187,6 @@ function sendLocationToFirebase(lat, lng) {
 // ==========================================
 
 function shareTrackingLink() {
-    // Génère le lien dédié aux proches avec l'ID de session
     const shareUrl = window.location.origin + window.location.pathname + '?session=' + sessionId;
 
     const shareData = {
@@ -203,9 +199,9 @@ function shareTrackingLink() {
         navigator.share(shareData).catch(() => {});
     } else {
         navigator.clipboard.writeText(shareUrl).then(() => {
-            showToast("Lien spectateur copié !");
+            showToast("Lien invité copié !");
         }).catch(() => {
-            alert("Erreur lors de la copie du lien.");
+            alert("Erreur de copie du lien.");
         });
     }
 }
