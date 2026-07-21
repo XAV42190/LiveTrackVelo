@@ -1,4 +1,4 @@
-const CACHE_NAME = 'livetrack-v5';
+const CACHE_NAME = 'livetrack-v8';
 const ASSETS = [
   './index.html',
   './app.js',
