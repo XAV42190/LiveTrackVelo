@@ -4,9 +4,27 @@
 let map, marker, polyline;
 let watchId = null;
 
-// Initialisation au chargement de la page
+// Gestion de la session (ID unique pour le partage)
+let sessionId = localStorage.getItem('livetrack_session_id');
+if (!sessionId) {
+    sessionId = 'session_' + Math.random().toString(36).substring(2, 9);
+    localStorage.setItem('livetrack_session_id', sessionId);
+}
+
+// Vérification si l'utilisateur est un spectateur (présence de ?session= dans l'URL)
+const urlParams = new URLSearchParams(window.location.search);
+const sharedSessionId = urlParams.get('session');
+const isViewer = Boolean(sharedSessionId);
+const activeSessionId = isViewer ? sharedSessionId : sessionId;
+
 window.addEventListener('DOMContentLoaded', () => {
-    // Crée la carte Leaflet (Centrée sur la France par défaut)
+    // Si c'est un spectateur, on masque la barre de boutons
+    if (isViewer) {
+        const controls = document.querySelector('.controls');
+        if (controls) controls.style.display = 'none';
+    }
+
+    // Création de la carte
     map = L.map('map').setView([46.603354, 1.888334], 6);
 
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -16,7 +34,6 @@ window.addEventListener('DOMContentLoaded', () => {
 
     polyline = L.polyline([], { color: '#007bff', weight: 5, opacity: 0.8 }).addTo(map);
 
-    // Correction d'affichage si l'écran redimensionne
     setTimeout(() => { map.invalidateSize(); }, 300);
 });
 
@@ -41,39 +58,54 @@ try {
     if (typeof firebase !== 'undefined' && firebaseConfig.databaseURL !== "VOS_VRAIES_INFOS_FIREBASE") {
         firebase.initializeApp(firebaseConfig);
         database = firebase.database();
-        locationRef = database.ref('livetrack/currentLocation');
+        
+        // Référence dynamique liée à la session courante
+        locationRef = database.ref('livetrack/sessions/' + activeSessionId);
 
-        // Mode spectateur (Écoute Firebase)
+        // MODE SPECTATEUR : Réception du tracé en temps réel
         locationRef.on('value', (snapshot) => {
             const data = snapshot.val();
-            if (data && data.latitude && data.longitude && watchId === null) { 
-                updateMap(data.latitude, data.longitude);
+            if (data) {
+                // Si la session contient un historique de points
+                if (data.history) {
+                    const points = Object.values(data.history);
+                    polyline.setLatLngs(points.map(p => [p.latitude, p.longitude]));
+                }
+                
+                // Position actuelle
+                if (data.currentLocation) {
+                    const lat = data.currentLocation.latitude;
+                    const lng = data.currentLocation.longitude;
+                    updateMarkerOnly(lat, lng);
+                }
             }
         });
     }
 } catch (e) {
-    console.warn("Firebase non initialisé ou clés absentes. Mode GPS local actif uniquement.", e);
+    console.warn("Firebase non initialisé.", e);
 }
 
 // ==========================================
-// 3. CONTRÔLE DU GPS & DES BOUTONS
+// 3. CONTRÔLE DU GPS (CYCLISTE)
 // ==========================================
 
 function startTracking() {
     if (!navigator.geolocation) {
-        alert("La géolocalisation n'est pas supportée par votre navigateur.");
+        alert("GPS non supporté.");
         return;
     }
 
-    // --- REINITIALISATION DU TRACÉ ET DU MARQUEUR ---
-    if (polyline) {
-        polyline.setLatLngs([]); // Efface la ligne bleue
-    }
+    // Réinitialisation locale du tracé
+    if (polyline) polyline.setLatLngs([]);
     if (marker) {
-        map.removeLayer(marker); // Supprime l'ancien marqueur de la carte
-        marker = null;           // Remet à zéro pour en récréer un propre au 1er point GPS
+        map.removeLayer(marker);
+        marker = null;
     }
-    // ------------------------------------------------
+
+    // Effacement de l'ancienne session dans Firebase pour repartir à zéro
+    if (locationRef) {
+        locationRef.remove();
+    }
 
     const startBtn = document.getElementById('startBtn');
     const stopBtn = document.getElementById('stopBtn');
@@ -88,19 +120,16 @@ function startTracking() {
             const lat = position.coords.latitude;
             const lng = position.coords.longitude;
 
-            // Update carte localement
             updateMap(lat, lng);
-
-            // Update Firebase si configuré
             sendLocationToFirebase(lat, lng);
         },
         (error) => {
-            alert("Erreur d'accès au GPS : " + error.message);
+            alert("Erreur GPS : " + error.message);
         },
         {
             enableHighAccuracy: true,
-            maximumAge: 10000,
-            timeout: 15000
+            maximumAge: 5000,
+            timeout: 10000
         }
     );
 }
@@ -118,7 +147,7 @@ function stopTracking() {
         stopBtn.disabled = true;
         stopBtn.style.opacity = '0.5';
 
-        showToast("Suivi arrêté. Le tracé est conservé.");
+        showToast("Suivi arrêté.");
     }
 }
 
@@ -126,44 +155,57 @@ function updateMap(lat, lng) {
     if (!map) return;
     const newPos = [lat, lng];
 
+    updateMarkerOnly(lat, lng);
+    polyline.addLatLng(newPos);
+}
+
+function updateMarkerOnly(lat, lng) {
+    const newPos = [lat, lng];
     if (!marker) {
         marker = L.marker(newPos).addTo(map);
         map.setView(newPos, 16);
     } else {
         marker.setLatLng(newPos);
     }
-
-    polyline.addLatLng(newPos);
 }
 
 function sendLocationToFirebase(lat, lng) {
     if (locationRef) {
-        locationRef.set({
+        // Enregistre la position actuelle + ajoute au tracé (history)
+        locationRef.child('currentLocation').set({
             latitude: lat,
             longitude: lng,
             timestamp: Date.now()
+        });
+
+        locationRef.child('history').push({
+            latitude: lat,
+            longitude: lng
         });
     }
 }
 
 // ==========================================
-// 4. PARTAGE ET NOTIFICATIONS
+// 4. FONCTION DE PARTAGE
 // ==========================================
 
 function shareTrackingLink() {
+    // Génère le lien dédié aux proches avec l'ID de session
+    const shareUrl = window.location.origin + window.location.pathname + '?session=' + sessionId;
+
     const shareData = {
         title: 'Mon LiveTrack Vélo 🚴‍♂️',
         text: 'Suivez mon parcours en direct !',
-        url: window.location.href
+        url: shareUrl
     };
 
     if (navigator.share) {
         navigator.share(shareData).catch(() => {});
     } else {
-        navigator.clipboard.writeText(window.location.href).then(() => {
-            showToast("Lien copié dans le presse-papier !");
+        navigator.clipboard.writeText(shareUrl).then(() => {
+            showToast("Lien spectateur copié !");
         }).catch(() => {
-            alert("Impossible de copier le lien automatiquement.");
+            alert("Erreur lors de la copie du lien.");
         });
     }
 }
