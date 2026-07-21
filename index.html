@@ -90,10 +90,10 @@
     <!-- Leaflet JS -->
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
-    <!-- Balise audio silencieuse pour empêcher la mise en veille du JS -->
-    <audio id="silentAudio" loop style="display: none;">
-        <source src="data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=" type="audio/wav">
-    </audio>
+    <!-- Vidéo ultra-légère en boucle pour forcer le maintien du GPS -->
+    <video id="silentVideo" playsinline loop muted style="display:none; width:1px; height:1px;">
+        <source src="data:video/mp4;base64,AAAAIGZ0eXBpc29tAAACAGlzb21pc28yYXZjMW1wNDEAAAAIZnJlZQAAAAdtZGF0AAAAAA==" type="video/mp4">
+    </video>
     
     <!-- Application JS (Ultra-léger sans SDK Firebase) -->
     <script src="./app.js"></script>
