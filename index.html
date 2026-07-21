@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>LiveTrack Vélo Universel</title>
+    <title>LiveTrack Vélo GPS</title>
     <link rel="manifest" href="manifest.json">
     <!-- Style pour la carte Leaflet -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
@@ -15,39 +15,19 @@
         #username { padding: 8px; border-radius: 5px; border: none; margin-bottom: 5px; width: 80%; max-width: 250px; font-size: 0.95em; text-align: center; }
         #map { flex-grow: 1; width: 100%; }
         .status { font-size: 0.95em; margin-top: 8px; color: #d1fae5; font-weight: bold; }
-        
-        /* BLOC GPS DE SECOURS ULTRA VISIBLE */
-        .gps-box { 
-            margin: 10px auto 0 auto; 
-            background: white; 
-            color: #1f2937; 
-            padding: 8px 12px; 
-            border-radius: 6px; 
-            display: inline-block; 
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-        }
-        .gps-box label { font-size: 0.9em; font-weight: bold; cursor: pointer; }
-        .gps-box input { transform: scale(1.3); margin-right: 8px; cursor: pointer; }
     </style>
 </head>
 <body>
 
     <div id="header">
         <h2>Mon LiveTrack Cycliste</h2>
-        <!-- Identification du cycliste -->
+        <!-- Saisie du prénom/nom -->
         <input type="text" id="username" placeholder="Votre prénom ou nom" value="Cycliste_Anonyme">
         <br>
-        <button id="btn-connect">Connecter mon compteur GPS</button>
+        <button id="btn-start">Démarrer le LiveTrack (GPS)</button>
         <button id="btn-reset">Nouvelle Sortie</button>
-        
-        <br>
-        <!-- Bloc d'activation du GPS de secours (Geoid / Magene / Garmin) -->
-        <div class="gps-box">
-            <input type="checkbox" id="use-phone-gps" checked>
-            <label for="use-phone-gps">Activer GPS de secours (Geoid, etc.)</label>
-        </div>
 
-        <div id="status" class="status">Statut : Initialisation...</div>
+        <div id="status" class="status">Statut : Prêt à démarrer</div>
     </div>
 
     <!-- La carte de suivi en temps réel -->
