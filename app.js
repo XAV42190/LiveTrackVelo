@@ -6,8 +6,10 @@ const FIREBASE_DB_URL = "https://suivisortievelo-default-rtdb.europe-west1.fireb
 let map, marker, polyline;
 let watchId = null;
 let viewerInterval = null;
+let commentsInterval = null; // Stocke le timer des commentaires
 let localPath = [];
 let wakeLock = null;
+let displayedCommentIds = new Set(); // Évite d'afficher deux fois le même commentaire
 
 // Détection de la session et du rôle (Spectateur vs Cycliste)
 const urlParams = new URLSearchParams(window.location.search);
@@ -53,6 +55,10 @@ window.addEventListener('DOMContentLoaded', () => {
         debugLog("CYCLISTE : Prêt (Session " + activeSessionId + ")");
     }
 
+    // === ICI : Chargement initial et écoute périodique des commentaires ===
+    fetchCommentsFromFirebase();
+    commentsInterval = setInterval(fetchCommentsFromFirebase, 4000);
+
     // Initialiser les clics des boutons
     setupEventListeners();
 });
@@ -63,7 +69,6 @@ function debugLog(msg) {
     if (!debugBox) {
         debugBox = document.createElement('div');
         debugBox.id = 'debugBox';
-        // Repositionné en haut : top: 10px au lieu de bottom: 10px
         debugBox.style.cssText = 'position:fixed;top:10px;left:10px;right:10px;background:rgba(0,0,0,0.85);color:#00ff00;font-family:monospace;font-size:12px;padding:8px;border-radius:5px;z-index:9999;word-break:break-all;max-height:80px;overflow-y:auto;';
         document.body.appendChild(debugBox);
     }
@@ -115,7 +120,6 @@ async function requestWakeLock() {
             wakeLock = await navigator.wakeLock.request('screen');
             debugLog("Anti-veille Écran : ACTIF 💡");
             
-            // Si l'utilisateur change d'onglet et revient, on réactive le réveil
             wakeLock.addEventListener('release', () => {
                 debugLog("Anti-veille relâché");
             });
@@ -125,7 +129,6 @@ async function requestWakeLock() {
     }
 }
 
-// Réactiver le Wake Lock si la page redevient visible (ex: retour sur le navigateur)
 document.addEventListener('visibilitychange', async () => {
     if (wakeLock !== null && document.visibilityState === 'visible') {
         await requestWakeLock();
@@ -133,7 +136,7 @@ document.addEventListener('visibilitychange', async () => {
 });
 
 // ==========================================
-// 4. REQUÊTES FIREBASE REST (SPECTATEUR)
+// 4. REQUÊTES FIREBASE REST (DONNÉES & COMMENTAIRES)
 // ==========================================
 function fetchPointsFromFirebase() {
     const url = `${FIREBASE_DB_URL}/livetrack/sessions/${activeSessionId}/pts.json`;
@@ -169,6 +172,47 @@ function fetchPointsFromFirebase() {
         });
 }
 
+// --- RECUPERATION DES COMMENTAIRES ---
+function fetchCommentsFromFirebase() {
+    const url = `${FIREBASE_DB_URL}/livetrack/sessions/${activeSessionId}/comments.json`;
+
+    fetch(url)
+        .then(res => res.json())
+        .then(data => {
+            if (!data) return;
+
+            Object.keys(data).forEach(key => {
+                // Éviter de ré-afficher un commentaire déjà présent sur la carte
+                if (!displayedCommentIds.has(key)) {
+                    displayedCommentIds.add(key);
+                    addCommentToMap(data[key]);
+                }
+            });
+        })
+        .catch(err => console.log("Erreur chargement commentaires: ", err));
+}
+
+// --- AFFICHAGE SUR LA CARTE ---
+function addCommentToMap(comment) {
+    if (!comment || !comment.lat || !comment.lng) return;
+
+    const timeStr = comment.timestamp 
+        ? new Date(comment.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        : '';
+
+    const commentIcon = L.divIcon({
+        className: 'custom-comment-icon',
+        html: `<div style="background-color: #FFC107; color: black; padding: 4px 8px; border-radius: 12px; font-weight: bold; font-size: 12px; border: 2px solid white; box-shadow: 0 2px 5px rgba(0,0,0,0.3); white-space: nowrap;">
+                💬 ${comment.text}
+               </div>`,
+        iconSize: [100, 30],
+        iconAnchor: [50, 15]
+    });
+
+    const commentMarker = L.marker([comment.lat, comment.lng], { icon: commentIcon }).addTo(map);
+    commentMarker.bindPopup(`<b>Commentaire (${timeStr}) :</b><br>${comment.text}`);
+}
+
 // ==========================================
 // 5. CONTRÔLE GPS & ENVOI (CYCLISTE)
 // ==========================================
@@ -178,28 +222,24 @@ function startTracking() {
         return;
     }
 
-    // 1. Activer les dispositifs anti-mise en veille
     requestWakeLock();
     startAntiSleep();
     startSilentAudio();
 
-    // 2. Déclencher automatiquement le partage de lien
     shareTrackingLink();
     
-    // 3. Réinitialisation des traces locales
     localPath = [];
+    displayedCommentIds.clear(); // Réinitialise les commentaires affichés
     if (polyline) polyline.setLatLngs([]);
     if (marker) {
         map.removeLayer(marker);
         marker = null;
     }
 
-    // 4. Effacer la session précédente dans Firebase pour repartir à zéro
     fetch(`${FIREBASE_DB_URL}/livetrack/sessions/${activeSessionId}.json`, {
         method: 'DELETE'
     });
 
-    // 5. Gestion de l'état des boutons
     const startBtn = document.getElementById('startBtn');
     const stopBtn = document.getElementById('stopBtn');
     
@@ -212,19 +252,16 @@ function startTracking() {
         stopBtn.style.opacity = '1';
     }
 
-    // Afficher le bouton Mode Poche au démarrage
     const pocketBtn = document.getElementById('pocketBtn');
     if (pocketBtn) pocketBtn.style.display = 'inline-block';
     
     debugLog("Recherche du signal GPS...");
 
-    // 6. Lancement de la géolocalisation continue
     watchId = navigator.geolocation.watchPosition(
         (position) => {
             const lat = position.coords.latitude;
             const lng = position.coords.longitude;
 
-            // Affichage carte locale
             localPath.push([lat, lng]);
             polyline.setLatLngs(localPath);
 
@@ -238,7 +275,6 @@ function startTracking() {
 
             debugLog("CYCLISTE : " + localPath.length + " pts | " + lat.toFixed(4) + ", " + lng.toFixed(4));
 
-            // Envoi HTTP POST direct à Firebase REST
             fetch(`${FIREBASE_DB_URL}/livetrack/sessions/${activeSessionId}/pts.json`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -262,16 +298,12 @@ function startTracking() {
 
 function stopTracking() {
     if (watchId !== null) {
-        // Arrêter le suivi GPS
         navigator.geolocation.clearWatch(watchId);
         watchId = null;
 
-        // Désactiver l'anti-veille audio et écran
         stopSilentAudio();
         stopAntiSleep();
-        releaseWakeLock();
 
-        // Rétablir les boutons
         const startBtn = document.getElementById('startBtn');
         const stopBtn = document.getElementById('stopBtn');
         
@@ -284,7 +316,6 @@ function stopTracking() {
             stopBtn.style.opacity = '0.5';
         }
 
-        // Masquer le bouton Mode Poche et l'overlay à l'arrêt
         const pocketBtn = document.getElementById('pocketBtn');
         const overlay = document.getElementById('blackOverlay');
         if (pocketBtn) pocketBtn.style.display = 'none';
@@ -323,7 +354,6 @@ function showToast(message) {
     }
 }
 
-// TOGGLE MODE POCHE
 function togglePocketMode() {
     const overlay = document.getElementById('blackOverlay');
     if (!overlay) return;
@@ -336,7 +366,7 @@ function togglePocketMode() {
 }
 
 // ==========================================
-// 6. DÉCLENCHEURS DES BOUTONS (EVENT LISTENERS)
+// 6. DÉCLENCHEURS DES BOUTONS
 // ==========================================
 function setupEventListeners() {
     const startBtn = document.getElementById('startBtn');
@@ -349,7 +379,6 @@ function setupEventListeners() {
     if (stopBtn) stopBtn.addEventListener('click', stopTracking);
     if (shareBtn) shareBtn.addEventListener('click', shareTrackingLink);
     
-    // Écouteurs Mode Poche
     if (pocketBtn) pocketBtn.addEventListener('click', togglePocketMode);
     if (blackOverlay) blackOverlay.addEventListener('click', togglePocketMode);
 }
