@@ -82,15 +82,14 @@
         <button id="stopBtn" onclick="stopTracking()" disabled>⏹ Arrêter</button>
         <button id="shareBtn" onclick="shareTrackingLink()">🔗 Partager</button>
         <button id="pocketBtn" onclick="togglePocketMode()" style="display:none;">📱 Mode Poche (Écran Noir)</button>
-        <div id="blackOverlay" onclick="togglePocketMode()" style="display:none; position:fixed; top:0; left:0; width:100vw; height:100vh; background:black; z-index:99999; color:white; text-align:center; padding-top:50%;">
-            🔒 Écran verrouillé<br><br><small>Touchez l'écran pour déverrouiller</small>
-        </div>
     </div>
 
     <div id="map"></div>
 
     <div id="toast">Lien copié dans le presse-papier !</div>
-
+    <div id="blackOverlay" onclick="togglePocketMode()" style="display:none; position:fixed; top:0; left:0; width:100vw; height:100vh; background:black; z-index:99999; color:white; text-align:center; padding-top:50%; box-sizing:border-box;">
+        🔒 Écran verrouillé<br><br><small>Touchez l'écran pour déverrouiller</small>
+    </div>
     <!-- Leaflet JS -->
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
