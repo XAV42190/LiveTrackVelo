@@ -112,18 +112,24 @@ async function requestWakeLock() {
     try {
         if ('wakeLock' in navigator) {
             wakeLock = await navigator.wakeLock.request('screen');
+            debugLog("Anti-veille Écran : ACTIF 💡");
+            
+            // Si l'utilisateur change d'onglet et revient, on réactive le réveil
+            wakeLock.addEventListener('release', () => {
+                debugLog("Anti-veille relâché");
+            });
         }
     } catch (err) {
-        console.log("Wake Lock indisponible:", err);
+        debugLog("WakeLock non supporté ou refusé par le navigateur");
     }
 }
 
-function releaseWakeLock() {
-    if (wakeLock !== null) {
-        wakeLock.release();
-        wakeLock = null;
+// Réactiver le Wake Lock si la page redevient visible (ex: retour sur le navigateur)
+document.addEventListener('visibilitychange', async () => {
+    if (wakeLock !== null && document.visibilityState === 'visible') {
+        await requestWakeLock();
     }
-}
+});
 
 // ==========================================
 // 4. REQUÊTES FIREBASE REST (SPECTATEUR)
@@ -172,9 +178,9 @@ function startTracking() {
     }
 
     // 1. Activer les dispositifs anti-mise en veille
+    requestWakeLock();
     startAntiSleep();
     startSilentAudio();
-    requestWakeLock();
 
     // 2. Déclencher automatiquement le partage de lien
     shareTrackingLink();
@@ -247,8 +253,8 @@ function startTracking() {
         },
         {
             enableHighAccuracy: true,
-            maximumAge: 1000,
-            timeout: 10000
+            maximumAge: 10000,
+            timeout: 50000
         }
     );
 }
