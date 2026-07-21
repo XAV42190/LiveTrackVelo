@@ -3,29 +3,25 @@
 // ==========================================
 let map, marker, polyline;
 let watchId = null;
-let pathCoordinates = []; // Contient [[lat, lng], [lat, lng], ...]
 
-// Gestion de la session
+// ID de Session unique
 let sessionId = localStorage.getItem('livetrack_session_id');
 if (!sessionId) {
     sessionId = 'session_' + Math.random().toString(36).substring(2, 9);
     localStorage.setItem('livetrack_session_id', sessionId);
 }
 
-// Détection du mode spectateur (?session=... dans l'URL)
+// Mode Spectateur
 const urlParams = new URLSearchParams(window.location.search);
 const sharedSessionId = urlParams.get('session');
 const isViewer = Boolean(sharedSessionId);
 const activeSessionId = isViewer ? sharedSessionId : sessionId;
 
 window.addEventListener('DOMContentLoaded', () => {
-    // Si spectateur : masquer les commandes
+    // Mode spectateur : on masque les boutons
     if (isViewer) {
         const controls = document.querySelector('.controls');
         if (controls) controls.style.display = 'none';
-        
-        // Petit message pour confirmer qu'on est en mode invité
-        showToast("Mode spectateur actif");
     }
 
     // Initialisation carte
@@ -36,10 +32,23 @@ window.addEventListener('DOMContentLoaded', () => {
         attribution: '© OpenStreetMap'
     }).addTo(map);
 
-    polyline = L.polyline([], { color: '#007bff', weight: 6, opacity: 0.9 }).addTo(map);
+    // Tracé rouge bien épais pour être ultra visible
+    polyline = L.polyline([], { color: '#ff0000', weight: 6, opacity: 0.9 }).addTo(map);
 
     setTimeout(() => { map.invalidateSize(); }, 300);
 });
+
+// Affichage d'un bandeau de débogage à l'écran
+function debugLog(msg) {
+    let debugBox = document.getElementById('debugBox');
+    if (!debugBox) {
+        debugBox = document.createElement('div');
+        debugBox.id = 'debugBox';
+        debugBox.style.cssText = 'position:fixed;bottom:10px;left:10px;right:10px;background:rgba(0,0,0,0.85);color:#00ff00;font-family:monospace;font-size:12px;padding:8px;border-radius:5px;z-index:9999;word-break:break-all;max-height:80px;overflow-y:auto;';
+        document.body.appendChild(debugBox);
+    }
+    debugBox.innerText = msg;
+}
 
 // ==========================================
 // 2. INITIALISATION FIREBASE & SYNCHRO
@@ -62,56 +71,43 @@ try {
     if (typeof firebase !== 'undefined' && firebaseConfig.databaseURL !== "VOS_VRAIES_INFOS_FIREBASE") {
         firebase.initializeApp(firebaseConfig);
         database = firebase.database();
-        
-        // Écoute spécifique de la session
-        locationRef = database.ref('livetrack/sessions/' + activeSessionId);
+        sessionRef = database.ref('livetrack/sessions/' + activeSessionId);
 
-        // RÉCEPTION TEMPS RÉEL
-        locationRef.on('value', (snapshot) => {
-            const data = snapshot.val();
-            
-            if (data) {
-                console.log("Données Firebase reçues :", data);
+        debugLog("Firebase connecté. Session: " + activeSessionId);
 
-                // Reconstitution du tracé
-                if (data.path) {
-                    // Si Firebase a converti le tableau en objet, on le ré-insère sous forme de tableau
-                    const rawPath = Array.isArray(data.path) ? data.path : Object.values(data.path);
-                    
-                    // Conversion sécurisée pour Leaflet [lat, lng]
-                    const formattedPath = rawPath.map(point => {
-                        if (Array.isArray(point)) return point; // Déjà [lat, lng]
-                        if (point.latitude && point.longitude) return [point.latitude, point.longitude]; // Format objet
-                        if (point.lat && point.lng) return [point.lat, point.lng];
-                        return null;
-                    }).filter(p => p !== null);
-
-                    if (formattedPath.length > 0) {
-                        polyline.setLatLngs(formattedPath);
-                    }
-                }
+        // RÉCEPTION EN TEMPS RÉEL (Méthode par événement de point)
+        sessionRef.child('pts').on('child_added', (snapshot) => {
+            const pt = snapshot.val();
+            if (pt && pt.lat && pt.lng) {
+                const newPos = [pt.lat, pt.lng];
                 
-                // Position actuelle + Recentrage de la carte
-                if (data.currentLocation) {
-                    const lat = Number(data.currentLocation.latitude);
-                    const lng = Number(data.currentLocation.longitude);
-                    
-                    if (!isNaN(lat) && !isNaN(lng)) {
-                        updateMarkerAndCenter(lat, lng);
-                    }
+                // Ajouter le point à la ligne
+                polyline.addLatLng(newPos);
+                
+                // Placer ou déplacer le marqueur
+                if (!marker) {
+                    marker = L.marker(newPos).addTo(map);
+                    map.setView(newPos, 16);
+                } else {
+                    marker.setLatLng(newPos);
+                    if (isViewer) map.panTo(newPos);
                 }
+
+                debugLog("Point reçu (" + polyline.getLatLngs().length + " pts): " + pt.lat.toFixed(4) + ", " + pt.lng.toFixed(4));
             }
-        }, (error) => {
-            console.error("Erreur de lecture Firebase :", error);
-            alert("Erreur Firebase (Droits de lecture) : " + error.message);
+        }, (err) => {
+            debugLog("Erreur lecture Firebase: " + err.message);
         });
+
+    } else {
+        debugLog("ERREUR : Clés Firebase non configurées !");
     }
 } catch (e) {
-    console.error("Erreur Firebase Init :", e);
+    debugLog("Exception Firebase: " + e.message);
 }
 
 // ==========================================
-// 3. CONTRÔLE GPS & ENVOI (CYCLISTE)
+// 3. SUIVI GPS (CYCLISTE)
 // ==========================================
 
 function startTracking() {
@@ -120,16 +116,15 @@ function startTracking() {
         return;
     }
 
-    // Réinitialisation
-    pathCoordinates = [];
+    // Réinitialisation locale et Firebase
     if (polyline) polyline.setLatLngs([]);
     if (marker) {
         map.removeLayer(marker);
         marker = null;
     }
 
-    if (locationRef) {
-        locationRef.remove(); // Nettoie la session précédente sur Firebase
+    if (sessionRef) {
+        sessionRef.remove(); // Supprime l'ancienne session
     }
 
     const startBtn = document.getElementById('startBtn');
@@ -140,23 +135,26 @@ function startTracking() {
     stopBtn.disabled = false;
     stopBtn.style.opacity = '1';
 
+    debugLog("Démarrage du GPS...");
+
     watchId = navigator.geolocation.watchPosition(
         (position) => {
             const lat = position.coords.latitude;
             const lng = position.coords.longitude;
 
-            const newPoint = [lat, lng];
-            pathCoordinates.push(newPoint);
-            
-            // Mise à jour locale du cycliste
-            polyline.setLatLngs(pathCoordinates);
-            updateMarkerAndCenter(lat, lng);
+            debugLog("GPS OK: " + lat.toFixed(4) + ", " + lng.toFixed(4));
 
-            // Envoi à Firebase
-            sendToFirebase(lat, lng);
+            // Envoi du point unique à Firebase
+            if (sessionRef) {
+                sessionRef.child('pts').push({
+                    lat: lat,
+                    lng: lng,
+                    t: Date.now()
+                });
+            }
         },
         (error) => {
-            alert("Erreur GPS : " + error.message);
+            debugLog("Erreur GPS: " + error.message);
         },
         {
             enableHighAccuracy: true,
@@ -179,39 +177,12 @@ function stopTracking() {
         stopBtn.disabled = true;
         stopBtn.style.opacity = '0.5';
 
-        showToast("Suivi arrêté.");
-    }
-}
-
-function updateMarkerAndCenter(lat, lng) {
-    const pos = [lat, lng];
-    if (!marker) {
-        marker = L.marker(pos).addTo(map);
-        map.setView(pos, 16);
-    } else {
-        marker.setLatLng(pos);
-        // Si c'est l'invité, la carte suit le mouvement automatiquement
-        if (isViewer) {
-            map.panTo(pos);
-        }
-    }
-}
-
-function sendToFirebase(lat, lng) {
-    if (locationRef) {
-        locationRef.set({
-            currentLocation: {
-                latitude: lat,
-                longitude: lng,
-                timestamp: Date.now()
-            },
-            path: pathCoordinates
-        });
+        debugLog("Suivi arrêté.");
     }
 }
 
 // ==========================================
-// 4. PARTAGE ET UTILS
+// 4. PARTAGE
 // ==========================================
 
 function shareTrackingLink() {
@@ -219,7 +190,7 @@ function shareTrackingLink() {
 
     const shareData = {
         title: 'Suivi vélo en direct 🚴‍♂️',
-        text: 'Suis ma position et mon tracé en direct !',
+        text: 'Suis ma position en direct !',
         url: shareUrl
     };
 
@@ -227,9 +198,9 @@ function shareTrackingLink() {
         navigator.share(shareData).catch(() => {});
     } else {
         navigator.clipboard.writeText(shareUrl).then(() => {
-            showToast("Lien copié dans le presse-papier !");
+            showToast("Lien copié !");
         }).catch(() => {
-            alert("Erreur lors de la copie.");
+            alert("Erreur de copie.");
         });
     }
 }
