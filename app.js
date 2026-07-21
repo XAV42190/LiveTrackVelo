@@ -157,8 +157,10 @@ function startTracking() {
     // 1. Activer les dispositifs anti-mise en veille
     startSilentAudio();
     requestWakeLock();
-
-    // 2. Réinitialisation des traces locales
+    // 2. 🚀 NOUVEAU : Déclencher automatiquement le partage de lien
+    shareTrackingLink();
+    
+    // 3. Réinitialisation des traces locales
     localPath = [];
     if (polyline) polyline.setLatLngs([]);
     if (marker) {
@@ -166,12 +168,12 @@ function startTracking() {
         marker = null;
     }
 
-    // 3. Effacer la session précédente dans Firebase pour repartir à zéro
+    // 4. Effacer la session précédente dans Firebase pour repartir à zéro
     fetch(`${FIREBASE_DB_URL}/livetrack/sessions/${activeSessionId}.json`, {
         method: 'DELETE'
     });
 
-    // 4. Gestion de l'état des boutons
+    // 5. Gestion de l'état des boutons
     const startBtn = document.getElementById('startBtn');
     const stopBtn = document.getElementById('stopBtn');
     
@@ -182,7 +184,7 @@ function startTracking() {
 
     debugLog("Recherche du signal GPS...");
 
-    // 5. Lancement de la géolocalisation continue
+    // 6. Lancement de la géolocalisation continue
     watchId = navigator.geolocation.watchPosition(
         (position) => {
             const lat = position.coords.latitude;
