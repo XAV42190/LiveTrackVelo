@@ -13,170 +13,155 @@ const firebaseConfig = {
   appId: "1:286724342837:web:89c3838de2393123f31d7c",
   measurementId: "G-PQ9MQX0DQ5"
 };
-const app = initializeApp(firebaseConfig);
-const db = getDatabase(app);
+// Initialisation de Firebase
+firebase.initializeApp(firebaseConfig);
+const database = firebase.database();
+const locationRef = database.ref('livetrack/currentLocation');
 
-// Variables globales
-let rideId = "";
-let firebaseListener = null;
-let phoneGpsWatchId = null;
+// ==========================================
+// 2. INITIALISATION DE LA CARTE LEAFLET
+// ==========================================
+// Coordonnées par défaut (France / Paris) au premier chargement
+const map = L.map('map').setView([46.603354, 1.888334], 6);
 
-// Initialisation de la carte Leaflet
-const map = L.map('map').setView([46.2276, 2.2137], 6); // Centré sur la France
 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19,
     attribution: '© OpenStreetMap'
 }).addTo(map);
 
 let marker = null;
-let path = L.polyline([], { color: '#10b981', weight: 5 }).addTo(map);
+let polyline = L.polyline([], { color: '#007bff', weight: 4 }).addTo(map);
+let watchId = null;
 
-// --- GESTION DES SESSIONS DYNAMIQUES ---
+// ==========================================
+// 3. FONCTIONS DE GÉOLOCALISATION & SUIVI
+// ==========================================
 
-function initialiserSession() {
-    // Vérifie si un proche ouvre un lien de partage (ex: ?ride=Thomas_171589139)
-    const urlParams = new URLSearchParams(window.location.search);
-    const sessionDemandee = urlParams.get('ride');
-
-    if (sessionDemandee) {
-        rideId = sessionDemandee;
-        // Mode Spectateur : On masque le bandeau de contrôle du cycliste
-        document.getElementById('header').style.display = 'none'; 
-        ecouterFirebase();
-    } else {
-        // Mode Cycliste
-        definirNouvelleSession();
-    }
-}
-
-function definirNouvelleSession() {
-    const rawName = document.getElementById('username').value.trim();
-    const cleanName = rawName.replace(/\s+/g, '_') || "Cycliste";
-    const timestamp = Date.now();
-    
-    rideId = `${cleanName}_${timestamp}`;
-    
-    resetCarte();
-    ecouterFirebase();
-    
-    document.getElementById('status').innerText = "Prêt. Cliquez sur 'Démarrer le LiveTrack'.";
-}
-
-function resetCarte() {
-    if (marker) {
-        map.removeLayer(marker);
-        marker = null;
-    }
-    path.setLatLngs([]);
-}
-
-function ecouterFirebase() {
-    if (firebaseListener) {
-        off(ref(db, `rides/${rideId}`));
+function startTracking() {
+    if (!navigator.geolocation) {
+        alert("La géolocalisation n'est pas supportée par votre appareil.");
+        return;
     }
 
-    // Écoute en temps réel des coordonnées stockées
-    firebaseListener = onValue(ref(db, `rides/${rideId}`), (snapshot) => {
-        const data = snapshot.val();
-        if (data) {
-            const { lat, lng } = data;
-            const coords = [lat, lng];
-            
-            if (!marker) {
-                marker = L.marker(coords).addTo(map);
-                map.setView(coords, 16);
-            } else {
-                marker.setLatLng(coords);
-            }
-            path.addLatLng(coords);
+    // Gestion visuelle des boutons
+    const startBtn = document.getElementById('startBtn');
+    const stopBtn = document.getElementById('stopBtn');
+    
+    startBtn.disabled = true;
+    startBtn.style.opacity = '0.5';
+    stopBtn.disabled = false;
+    stopBtn.style.opacity = '1';
+
+    // Démarrage du capteur GPS mobile
+    watchId = navigator.geolocation.watchPosition(
+        (position) => {
+            const lat = position.coords.latitude;
+            const lng = position.coords.longitude;
+
+            // Update local
+            updateMap(lat, lng);
+
+            // Update Firebase pour la diffusion en direct
+            sendLocationToFirebase(lat, lng);
+        },
+        (error) => {
+            console.error("Erreur GPS :", error.message);
+        },
+        {
+            enableHighAccuracy: true,
+            maximumAge: 0,
+            timeout: 5000
         }
+    );
+}
+
+function stopTracking() {
+    if (watchId !== null) {
+        // Arrêt de la lecture du GPS (préserve la batterie et stoppe la mise à jour)
+        navigator.geolocation.clearWatch(watchId);
+        watchId = null;
+
+        // Gestion visuelle des boutons
+        const startBtn = document.getElementById('startBtn');
+        const stopBtn = document.getElementById('stopBtn');
+        
+        startBtn.disabled = false;
+        startBtn.style.opacity = '1';
+        stopBtn.disabled = true;
+        stopBtn.style.opacity = '0.5';
+
+        showToast("Suivi arrêté. Le tracé reste affiché.");
+    }
+}
+
+// Mise à jour de la carte (marqueur + ligne du parcours)
+function updateMap(lat, lng) {
+    const newPos = [lat, lng];
+
+    if (!marker) {
+        marker = L.marker(newPos).addTo(map);
+        map.setView(newPos, 15);
+    } else {
+        marker.setLatLng(newPos);
+    }
+
+    // Ajoute le point actuel à la ligne de parcours sans l'effacer
+    polyline.addLatLng(newPos);
+}
+
+// Envoi de la position dans la base Firebase
+function sendLocationToFirebase(lat, lng) {
+    locationRef.set({
+        latitude: lat,
+        longitude: lng,
+        timestamp: Date.now()
     });
 }
 
-// --- SUIVI GPS DU TELEPHONE ---
-
-const btnStart = document.getElementById('btn-start');
-const statusText = document.getElementById('status');
-
-btnStart.addEventListener('click', async () => {
-    if ("geolocation" in navigator) {
-        statusText.innerText = "Demande d'accès au GPS en cours...";
-        
-        // Maintien de l'écran allumé
-        if ('wakeLock' in navigator) {
-            try { await navigator.wakeLock.request('screen'); } catch (e) {}
+// ==========================================
+// 4. ÉCOUTE DE FIREBASE (MODE SPECTATEUR)
+// ==========================================
+// Si quelqu'un ouvre l'application via le lien partagé, la carte se met à jour en direct
+locationRef.on('value', (snapshot) => {
+    const data = snapshot.val();
+    if (data && data.latitude && data.longitude) {
+        // Met à jour la carte pour la personne qui consulte le lien
+        if (watchId === null) { 
+            updateMap(data.latitude, data.longitude);
         }
+    }
+});
 
-        // Écoute continue de la position
-        phoneGpsWatchId = navigator.geolocation.watchPosition(
-            (position) => {
-                const latitude = position.coords.latitude;
-                const longitude = position.coords.longitude;
-                
-                if (latitude && longitude) {
-                    statusText.innerText = `📡 LiveTrack Actif : ${latitude.toFixed(5)}, ${longitude.toFixed(5)}`;
-                    
-                    // Envoi vers Firebase
-                    set(ref(db, `rides/${rideId}`), {
-                        lat: latitude,
-                        lng: longitude,
-                        timestamp: Date.now()
-                    }).catch(err => {
-                        console.error("Erreur Firebase : ", err);
-                        statusText.innerText = "Erreur d'envoi vers Firebase (Vérifiez votre connexion internet)";
-                    });
-                }
-            }, 
-            (error) => {
-                console.error("Erreur GPS Téléphone : ", error);
-                // AFFICHE LE CODE D'ERREUR SUR L'ÉCRAN
-                switch(error.code) {
-                    case error.PERMISSION_DENIED:
-                        statusText.innerText = "❌ Erreur : Permission GPS refusée par l'utilisateur.";
-                        alert("Veuillez autoriser l'accès à la localisation dans les paramètres de votre téléphone.");
-                        break;
-                    case error.POSITION_UNAVAILABLE:
-                        statusText.innerText = "❌ Erreur : Signal GPS indisponible (Sortez à l'extérieur).";
-                        break;
-                    case error.TIMEOUT:
-                        statusText.innerText = "❌ Erreur : Le GPS du téléphone met trop de temps à répondre.";
-                        break;
-                    default:
-                        statusText.innerText = "❌ Erreur GPS : " + error.message;
-                        break;
-                }
-            }, 
-            {
-                enableHighAccuracy: true, // Requis pour utiliser la puce GPS
-                maximumAge: 0,
-                timeout: 15000
-            }
-        );
+// ==========================================
+// 5. FONCTIONS DE PARTAGE & NOTIFICATIONS
+// ==========================================
 
-        btnStart.style.display = 'none';
+function shareTrackingLink() {
+    const shareData = {
+        title: 'Mon LiveTrack Vélo 🚴‍♂️',
+        text: 'Suivez ma position en direct sur la carte !',
+        url: window.location.href
+    };
 
+    // 1. Menu de partage natif (sur smartphone Android / iOS)
+    if (navigator.share) {
+        navigator.share(shareData).catch(() => {});
     } else {
-        alert("La géolocalisation n'est pas supportée par votre navigateur.");
+        // 2. Fallback rapide pour ordinateur (Copie dans le presse-papier)
+        navigator.clipboard.writeText(window.location.href).then(() => {
+            showToast("Lien copié dans le presse-papier !");
+        }).catch(err => {
+            alert("Erreur de copie : " + err);
+        });
     }
-});
-
-// Action du bouton "Nouvelle Sortie"
-document.getElementById('btn-reset').addEventListener('click', () => {
-    if (confirm("Voulez-vous clôturer cette sortie et en démarrer une nouvelle ?")) {
-        if (phoneGpsWatchId) {
-            navigator.geolocation.clearWatch(phoneGpsWatchId);
-        }
-        btnStart.style.display = 'inline-block';
-        definirNouvelleSession();
-        
-        const shareUrl = `${window.location.origin}${window.location.pathname}?ride=${rideId}`;
-        alert("Lien de suivi pour vos proches :\n\n" + shareUrl);
-    }
-});
-
-// Enregistrement du Service Worker
-if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('sw.js').catch(err => console.error(err));
 }
 
-// Initialisation au chargement
-initialiserSession();
+// Bulle d'information visuelle
+function showToast(message) {
+    const toast = document.getElementById("toast");
+    toast.innerText = message;
+    toast.style.display = "block";
+    setTimeout(() => {
+        toast.style.display = "none";
+    }, 3000);
+}
