@@ -1,20 +1,36 @@
-const CACHE_NAME = 'livetrack-v8';
-const ASSETS = [
+// ⚠️ Augmentez le chiffre ici (v101, v102...) à CHAQUE modification sur GitHub !
+const CACHE_NAME = 'livetrack-v101'; 
+
+const assets = [
+  './',
   './index.html',
   './app.js',
-  './manifest.json',
-  'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css',
-  'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js'
+  './manifest.json'
 ];
 
-self.addEventListener('install', (e) => {
-  e.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll(ASSETS))
+// Installation : force le Service Worker à s'installer sans attendre
+self.addEventListener('install', (event) => {
+  self.skipWaiting();
+  event.waitUntil(
+    caches.open(CACHE_NAME).then((cache) => {
+      return cache.addAll(assets);
+    })
   );
 });
 
-self.addEventListener('fetch', (e) => {
-  e.respondWith(
-    caches.match(e.request).then((res) => res || fetch(e.request))
+// Activation : NETTOIE AUTOMATIQUEMENT LES ANCIENS CACHES
+self.addEventListener('activate', (event) => {
+  event.waitUntil(
+    caches.keys().then((cacheNames) => {
+      return Promise.all(
+        cacheNames.map((cache) => {
+          if (cache !== CACHE_NAME) {
+            console.log('Suppression de l ancien cache :', cache);
+            return caches.delete(cache); // <--- C'est cette ligne qui vide le vieux cache sur le téléphone
+          }
+        })
+      );
+    })
   );
+  self.clients.claim();
 });
