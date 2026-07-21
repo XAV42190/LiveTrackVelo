@@ -99,8 +99,8 @@ function startTracking() {
         },
         {
             enableHighAccuracy: true,
-            maximumAge: 0,
-            timeout: 10000
+            maximumAge: 10000,
+            timeout: 15000
         }
     );
 }
