@@ -81,6 +81,10 @@
         <button id="startBtn" onclick="startTracking()">▶ Démarrer</button>
         <button id="stopBtn" onclick="stopTracking()" disabled>⏹ Arrêter</button>
         <button id="shareBtn" onclick="shareTrackingLink()">🔗 Partager</button>
+        <button id="pocketBtn" onclick="togglePocketMode()" style="display:none;">📱 Mode Poche (Écran Noir)</button>
+        <div id="blackOverlay" onclick="togglePocketMode()" style="display:none; position:fixed; top:0; left:0; width:100vw; height:100vh; background:black; z-index:99999; color:white; text-align:center; padding-top:50%;">
+            🔒 Écran verrouillé<br><br><small>Touchez l'écran pour déverrouiller</small>
+        </div>
     </div>
 
     <div id="map"></div>
