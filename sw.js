@@ -1,5 +1,5 @@
 // ⚠️ Augmentez le chiffre ici (v101, v102...) à CHAQUE modification sur GitHub !
-const CACHE_NAME = 'livetrack-v101'; 
+const CACHE_NAME = 'livetrack-v102'; 
 
 const assets = [
   './',
