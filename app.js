@@ -1,4 +1,31 @@
-// === CONFIGURATION FIREBASE ===
+// ==========================================
+// 1. INITIALISATION CARTE LEAFLET
+// ==========================================
+let map, marker, polyline;
+let watchId = null;
+
+// Initialisation au chargement de la page
+window.addEventListener('DOMContentLoaded', () => {
+    // Crée la carte Leaflet (Centrée sur la France par défaut)
+    map = L.map('map').setView([46.603354, 1.888334], 6);
+
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        maxZoom: 19,
+        attribution: '© OpenStreetMap'
+    }).addTo(map);
+
+    polyline = L.polyline([], { color: '#007bff', weight: 5, opacity: 0.8 }).addTo(map);
+
+    // Correction d'affichage si l'écran redimensionne
+    setTimeout(() => { map.invalidateSize(); }, 300);
+});
+
+// ==========================================
+// 2. INITIALISATION SÉCURISÉE FIREBASE
+// ==========================================
+let database = null;
+let locationRef = null;
+
 // Remplacez par vos clés issues de la console Firebase
 const firebaseConfig = {
   apiKey: "AIzaSyBE-6F7c2rF-f5DQDv3D9Wiu9l1eiNbY0s",
@@ -10,38 +37,31 @@ const firebaseConfig = {
   measurementId: "G-PQ9MQX0DQ5"
 };
 
-// Initialisation sécurisée
-if (!firebase.apps.length) {
-    firebase.initializeApp(firebaseConfig);
+try {
+    if (typeof firebase !== 'undefined' && firebaseConfig.databaseURL !== "VOS_VRAIES_INFOS_FIREBASE") {
+        firebase.initializeApp(firebaseConfig);
+        database = firebase.database();
+        locationRef = database.ref('livetrack/currentLocation');
+
+        // Mode spectateur (Écoute Firebase)
+        locationRef.on('value', (snapshot) => {
+            const data = snapshot.val();
+            if (data && data.latitude && data.longitude && watchId === null) { 
+                updateMap(data.latitude, data.longitude);
+            }
+        });
+    }
+} catch (e) {
+    console.warn("Firebase non initialisé ou clés absentes. Mode GPS local actif uniquement.", e);
 }
-const database = firebase.database();
-const locationRef = database.ref('livetrack/currentLocation');
 
 // ==========================================
-// 2. INITIALISATION CARTE LEAFLET
-// ==========================================
-// Centré par défaut sur la France
-const map = L.map('map').setView([46.603354, 1.888334], 6);
-
-L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    maxZoom: 19,
-    attribution: '© OpenStreetMap'
-}).addTo(map);
-
-let marker = null;
-let polyline = L.polyline([], { color: '#007bff', weight: 5, opacity: 0.8 }).addTo(map);
-let watchId = null;
-
-// Fix pour forcer l'affichage complet des tuiles de la carte
-setTimeout(() => { map.invalidateSize(); }, 500);
-
-// ==========================================
-// 3. SUIVI GPS & BOUTONS
+// 3. CONTRÔLE DU GPS & DES BOUTONS
 // ==========================================
 
 function startTracking() {
     if (!navigator.geolocation) {
-        alert("GPS non supporté par votre appareil.");
+        alert("La géolocalisation n'est pas supportée par votre navigateur.");
         return;
     }
 
@@ -58,11 +78,14 @@ function startTracking() {
             const lat = position.coords.latitude;
             const lng = position.coords.longitude;
 
+            // Update carte localement
             updateMap(lat, lng);
+
+            // Update Firebase si configuré
             sendLocationToFirebase(lat, lng);
         },
         (error) => {
-            console.error("Erreur GPS :", error.message);
+            alert("Erreur d'accès au GPS : " + error.message);
         },
         {
             enableHighAccuracy: true,
@@ -90,6 +113,7 @@ function stopTracking() {
 }
 
 function updateMap(lat, lng) {
+    if (!map) return;
     const newPos = [lat, lng];
 
     if (!marker) {
@@ -103,28 +127,17 @@ function updateMap(lat, lng) {
 }
 
 function sendLocationToFirebase(lat, lng) {
-    locationRef.set({
-        latitude: lat,
-        longitude: lng,
-        timestamp: Date.now()
-    });
+    if (locationRef) {
+        locationRef.set({
+            latitude: lat,
+            longitude: lng,
+            timestamp: Date.now()
+        });
+    }
 }
 
 // ==========================================
-// 4. RÉCEPTION DU SIGNAL (MODE SPECTATEUR)
-// ==========================================
-locationRef.on('value', (snapshot) => {
-    const data = snapshot.val();
-    if (data && data.latitude && data.longitude) {
-        // Met à jour la carte pour les proches qui observent
-        if (watchId === null) { 
-            updateMap(data.latitude, data.longitude);
-        }
-    }
-});
-
-// ==========================================
-// 5. PARTAGE DU LIEN
+// 4. PARTAGE ET NOTIFICATIONS
 // ==========================================
 
 function shareTrackingLink() {
@@ -140,7 +153,7 @@ function shareTrackingLink() {
         navigator.clipboard.writeText(window.location.href).then(() => {
             showToast("Lien copié dans le presse-papier !");
         }).catch(() => {
-            alert("Erreur lors de la copie du lien.");
+            alert("Impossible de copier le lien automatiquement.");
         });
     }
 }
