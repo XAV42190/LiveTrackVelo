@@ -182,7 +182,8 @@ function startTracking() {
     stopBtn.disabled = false;
     stopBtn.style.opacity = '1';
     // Afficher le bouton Mode Poche au démarrage
-    document.getElementById('pocketBtn').style.display = 'inline-block';
+    const pocketBtn = document.getElementById('pocketBtn');
+    if (pocketBtn) pocketBtn.style.display = 'inline-block';
     debugLog("Recherche du signal GPS...");
 
     // 6. Lancement de la géolocalisation continue
@@ -247,10 +248,10 @@ function stopTracking() {
         stopBtn.disabled = true;
         stopBtn.style.opacity = '0.5';
         // Masquer le bouton Mode Poche à l'arrêt
-        document.getElementById('pocketBtn').style.display = 'none';
-
-        // Si le mode poche était actif, le fermer aussi
-        document.getElementById('blackOverlay').style.display = 'none';
+       const pocketBtn = document.getElementById('pocketBtn');
+        const overlay = document.getElementById('blackOverlay');
+        if (pocketBtn) pocketBtn.style.display = 'none';
+        if (overlay) overlay.style.display = 'none';
         debugLog("Suivi arrêté.");
     }
 }
@@ -300,5 +301,16 @@ function stopAntiSleep() {
     const video = document.getElementById('silentVideo');
     if (video) {
         video.pause();
+    }
+}
+function togglePocketMode() {
+    const overlay = document.getElementById('blackOverlay');
+    if (!overlay) return;
+
+    // Si le masque est caché (ou vide), on l'affiche en plein écran
+    if (overlay.style.display === 'none' || overlay.style.display === '') {
+        overlay.style.display = 'flex';
+    } else {
+        overlay.style.display = 'none';
     }
 }
