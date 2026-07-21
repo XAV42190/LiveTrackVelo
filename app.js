@@ -155,7 +155,7 @@ function startTracking() {
     }
 
     // 1. Activer les dispositifs anti-mise en veille
-    startSilentAudio();
+    startAntiSleep(); // <--- Lance la vidéo
     requestWakeLock();
     // 2. 🚀 NOUVEAU : Déclencher automatiquement le partage de lien
     shareTrackingLink();
@@ -234,6 +234,7 @@ function stopTracking() {
 
         // Désactiver l'anti-veille audio et écran
         stopSilentAudio();
+        stopAntiSleep(); // <--- Stoppe la vidéo
         releaseWakeLock();
 
         // Rétablir les boutons
@@ -278,5 +279,21 @@ function showToast(message) {
         toast.innerText = message;
         toast.style.display = "block";
         setTimeout(() => { toast.style.display = "none"; }, 3000);
+    }
+}
+// Lance la vidéo invisible pour forcer le maintien du GPS par Android
+function startAntiSleep() {
+    const video = document.getElementById('silentVideo');
+    if (video) {
+        video.play().then(() => {
+            debugLog("Anti-veille vidéo actif 🎥 (GPS forcé)");
+        }).catch(err => console.log("Erreur vidéo:", err));
+    }
+}
+
+function stopAntiSleep() {
+    const video = document.getElementById('silentVideo');
+    if (video) {
+        video.pause();
     }
 }
