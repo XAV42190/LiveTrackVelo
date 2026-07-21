@@ -4,23 +4,23 @@
 let map, marker, polyline;
 let watchId = null;
 
-// Détection de la session via l'URL
+// Détection STRICTE du rôle via l'URL
 const urlParams = new URLSearchParams(window.location.search);
-let sharedSessionId = urlParams.get('session');
-const isViewer = Boolean(sharedSessionId);
+const sharedSessionId = urlParams.get('session');
+const isViewer = Boolean(sharedSessionId); // VRAI uniquement si 'session=' est dans l'URL
 
-// Si pas de session dans l'URL, on utilise/génère une session locale pour le cycliste
+// Gestion de l'ID de session
 let sessionId = localStorage.getItem('livetrack_session_id');
 if (!sessionId) {
     sessionId = 'session_' + Math.random().toString(36).substring(2, 9);
     localStorage.setItem('livetrack_session_id', sessionId);
 }
 
-// ID de session VRAIMENT actif
+// L'ID actif : si invité -> ID de l'URL, si cycliste -> ID local
 const activeSessionId = isViewer ? sharedSessionId : sessionId;
 
 window.addEventListener('DOMContentLoaded', () => {
-    // Mode spectateur : masquer les boutons
+    // Si spectateur : on masque les boutons de contrôle
     if (isViewer) {
         const controls = document.querySelector('.controls');
         if (controls) controls.style.display = 'none';
@@ -34,7 +34,6 @@ window.addEventListener('DOMContentLoaded', () => {
         attribution: '© OpenStreetMap'
     }).addTo(map);
 
-    // Ligne rouge très visible
     polyline = L.polyline([], { color: '#ff0000', weight: 6, opacity: 0.9 }).addTo(map);
 
     setTimeout(() => { map.invalidateSize(); }, 300);
@@ -75,14 +74,14 @@ try {
         
         firebase.auth().signInAnonymously().then(() => {
             database = firebase.database();
-            
-            // Pointer exactement sur le bon nœud
             sessionRef = database.ref('livetrack/sessions/' + activeSessionId);
 
-            debugLog("Auth OK (" + (isViewer ? "Invité" : "Cycliste") + ") ID: " + activeSessionId);
-
-            // Écouter directement le sous-nœud 'pts'
-            startListening();
+            if (isViewer) {
+                debugLog("Mode SPECTATEUR connecté - ID: " + activeSessionId);
+                startListening(); // L'invité écoute les points
+            } else {
+                debugLog("Mode CYCLISTE prêt - ID: " + activeSessionId);
+            }
         }).catch((err) => {
             debugLog("Erreur Auth: " + err.message);
         });
@@ -94,26 +93,24 @@ try {
     debugLog("Exception Init: " + e.message);
 }
 
+// ÉCOUTEUR (EXCLUSIF SPECTATEUR)
 function startListening() {
     if (!sessionRef) return;
 
-    // Écoute spécifique sur 'pts'
     sessionRef.child('pts').on('value', (snapshot) => {
         const data = snapshot.val();
         
         if (!data) {
-            debugLog("Connecté (" + (isViewer ? "Invité" : "Cycliste") + ") - En attente de points GPS...");
+            debugLog("Spectateur : En attente du démarrage du parcours...");
             return;
         }
 
-        // Conversion des points Firebase en coordonnées [lat, lng]
         const rawPoints = Object.values(data);
         const coords = rawPoints.map(p => [p.lat, p.lng]);
 
-        // Redessiner la ligne
+        // Mise à jour carte
         polyline.setLatLngs(coords);
 
-        // Mettre à jour le marqueur
         const lastPoint = coords[coords.length - 1];
         if (lastPoint) {
             if (!marker) {
@@ -121,19 +118,20 @@ function startListening() {
                 map.setView(lastPoint, 16);
             } else {
                 marker.setLatLng(lastPoint);
-                if (isViewer) map.panTo(lastPoint);
+                map.panTo(lastPoint);
             }
         }
 
-        debugLog("SUIVI ACTIF : " + coords.length + " points reçus !");
+        debugLog("SPECTATEUR : " + coords.length + " points reçus en direct !");
     }, (err) => {
         debugLog("Erreur Synchro: " + err.message);
     });
 }
 
 // ==========================================
-// 3. CONTRÔLE GPS (CYCLISTE)
+// 3. CONTRÔLE GPS (CYCLISTE UNIQUEMENT)
 // ==========================================
+let localPath = [];
 
 function startTracking() {
     if (!navigator.geolocation) {
@@ -141,14 +139,14 @@ function startTracking() {
         return;
     }
 
-    // Réinitialiser la carte locale
+    localPath = [];
     if (polyline) polyline.setLatLngs([]);
     if (marker) {
         map.removeLayer(marker);
         marker = null;
     }
 
-    // Effacer l'ancienne session sur Firebase pour repartir à zéro
+    // Réinitialiser la base Firebase pour cette session
     if (sessionRef) {
         sessionRef.remove();
     }
@@ -168,9 +166,21 @@ function startTracking() {
             const lat = position.coords.latitude;
             const lng = position.coords.longitude;
 
-            debugLog("GPS local: " + lat.toFixed(4) + ", " + lng.toFixed(4));
+            // 1. Mise à jour de la carte DU CYCLISTE en local
+            localPath.push([lat, lng]);
+            polyline.setLatLngs(localPath);
 
-            // Envoi explicite à Firebase
+            if (!marker) {
+                marker = L.marker([lat, lng]).addTo(map);
+                map.setView([lat, lng], 16);
+            } else {
+                marker.setLatLng([lat, lng]);
+                map.panTo([lat, lng]);
+            }
+
+            debugLog("CYCLISTE : " + localPath.length + " pts envoyés (GPS: " + lat.toFixed(4) + ", " + lng.toFixed(4) + ")");
+
+            // 2. Envoi à Firebase pour les invités
             if (sessionRef) {
                 sessionRef.child('pts').push({
                     lat: lat,
@@ -210,10 +220,9 @@ function stopTracking() {
 // ==========================================
 // 4. PARTAGE
 // ==========================================
-
 function shareTrackingLink() {
-    // Génère le lien exact basé sur activeSessionId
-    const shareUrl = window.location.origin + window.location.pathname + '?session=' + activeSessionId;
+    // Génère l'URL avec le bon paramètre de session
+    const shareUrl = window.location.origin + window.location.pathname + '?session=' + sessionId;
 
     const shareData = {
         title: 'Suivi vélo en direct 🚴‍♂️',
