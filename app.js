@@ -99,41 +99,63 @@ const statusText = document.getElementById('status');
 
 btnStart.addEventListener('click', async () => {
     if ("geolocation" in navigator) {
-        statusText.innerText = "Recherche du signal GPS du téléphone...";
+        statusText.innerText = "Demande d'accès au GPS en cours...";
         
         // Maintien de l'écran allumé
         if ('wakeLock' in navigator) {
             try { await navigator.wakeLock.request('screen'); } catch (e) {}
         }
 
-        // Écoute continue de la position avec haute précision
-        phoneGpsWatchId = navigator.geolocation.watchPosition((position) => {
-            const latitude = position.coords.latitude;
-            const longitude = position.coords.longitude;
-            
-            if (latitude && longitude) {
-                statusText.innerText = `📡 LiveTrack Actif : ${latitude.toFixed(5)}, ${longitude.toFixed(5)}`;
+        // Écoute continue de la position
+        phoneGpsWatchId = navigator.geolocation.watchPosition(
+            (position) => {
+                const latitude = position.coords.latitude;
+                const longitude = position.coords.longitude;
                 
-                // Envoi vers Firebase
-                set(ref(db, `rides/${rideId}`), {
-                    lat: latitude,
-                    lng: longitude,
-                    timestamp: Date.now()
-                }).catch(err => console.error("Erreur Firebase : ", err));
+                if (latitude && longitude) {
+                    statusText.innerText = `📡 LiveTrack Actif : ${latitude.toFixed(5)}, ${longitude.toFixed(5)}`;
+                    
+                    // Envoi vers Firebase
+                    set(ref(db, `rides/${rideId}`), {
+                        lat: latitude,
+                        lng: longitude,
+                        timestamp: Date.now()
+                    }).catch(err => {
+                        console.error("Erreur Firebase : ", err);
+                        statusText.innerText = "Erreur d'envoi vers Firebase (Vérifiez votre connexion internet)";
+                    });
+                }
+            }, 
+            (error) => {
+                console.error("Erreur GPS Téléphone : ", error);
+                // AFFICHE LE CODE D'ERREUR SUR L'ÉCRAN
+                switch(error.code) {
+                    case error.PERMISSION_DENIED:
+                        statusText.innerText = "❌ Erreur : Permission GPS refusée par l'utilisateur.";
+                        alert("Veuillez autoriser l'accès à la localisation dans les paramètres de votre téléphone.");
+                        break;
+                    case error.POSITION_UNAVAILABLE:
+                        statusText.innerText = "❌ Erreur : Signal GPS indisponible (Sortez à l'extérieur).";
+                        break;
+                    case error.TIMEOUT:
+                        statusText.innerText = "❌ Erreur : Le GPS du téléphone met trop de temps à répondre.";
+                        break;
+                    default:
+                        statusText.innerText = "❌ Erreur GPS : " + error.message;
+                        break;
+                }
+            }, 
+            {
+                enableHighAccuracy: true, // Requis pour utiliser la puce GPS
+                maximumAge: 0,
+                timeout: 15000
             }
-        }, (error) => {
-            console.error("Erreur GPS Téléphone : ", error);
-            statusText.innerText = "Erreur : Veuillez autoriser la géolocalisation sur votre téléphone.";
-        }, {
-            enableHighAccuracy: true, // Force l'utilisation de la puce GPS
-            maximumAge: 0,
-            timeout: 10000
-        });
+        );
 
         btnStart.style.display = 'none';
 
     } else {
-        alert("La géolocalisation n'est pas supportée par votre téléphone.");
+        alert("La géolocalisation n'est pas supportée par votre navigateur.");
     }
 });
 
