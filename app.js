@@ -18,13 +18,11 @@ const isViewer = Boolean(sharedSessionId);
 const activeSessionId = isViewer ? sharedSessionId : sessionId;
 
 window.addEventListener('DOMContentLoaded', () => {
-    // Mode spectateur : on masque les boutons de contrôle
     if (isViewer) {
         const controls = document.querySelector('.controls');
         if (controls) controls.style.display = 'none';
     }
 
-    // Initialisation carte
     map = L.map('map').setView([46.603354, 1.888334], 6);
 
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -32,13 +30,11 @@ window.addEventListener('DOMContentLoaded', () => {
         attribution: '© OpenStreetMap'
     }).addTo(map);
 
-    // Ligne rouge très visible
     polyline = L.polyline([], { color: '#ff0000', weight: 6, opacity: 0.9 }).addTo(map);
 
     setTimeout(() => { map.invalidateSize(); }, 300);
 });
 
-// Bandeau de débogage en bas de l'écran
 function debugLog(msg) {
     let debugBox = document.getElementById('debugBox');
     if (!debugBox) {
@@ -49,6 +45,7 @@ function debugLog(msg) {
     }
     debugBox.innerText = msg;
 }
+
 // ==========================================
 // 2. INITIALISATION FIREBASE & SYNCHRO
 // ==========================================
@@ -69,53 +66,60 @@ const firebaseConfig = {
 try {
     if (typeof firebase !== 'undefined' && firebaseConfig.databaseURL !== "VOS_VRAIES_INFOS_FIREBASE") {
         firebase.initializeApp(firebaseConfig);
-        database = firebase.database();
         
-        // Emplacement de la session
-        sessionRef = database.ref('livetrack/sessions/' + activeSessionId);
+        // Connexion Anonyme obligatoire pour débloquer les droits
+        firebase.auth().signInAnonymously().then(() => {
+            database = firebase.database();
+            sessionRef = database.ref('livetrack/sessions/' + activeSessionId);
 
-        debugLog("Connecté (" + (isViewer ? "Invité" : "Cycliste") + ") ID: " + activeSessionId);
+            debugLog("Auth OK (" + (isViewer ? "Invité" : "Cycliste") + ") ID: " + activeSessionId);
 
-        // --- ÉCOUTE TOTALE EN TEMPS RÉEL VIA 'VALUE' ---
-        sessionRef.on('value', (snapshot) => {
-            const data = snapshot.val();
-            
-            if (!data) {
-                debugLog("Session en attente de données...");
-                return;
-            }
-
-            // Récupération des points
-            if (data.pts) {
-                const rawPoints = Object.values(data.pts); // Convertit l'objet Firebase en tableau
-                const coords = rawPoints.map(p => [p.lat, p.lng]);
-
-                // Mise à jour de la ligne du tracé
-                polyline.setLatLngs(coords);
-
-                // Récupération du dernier point pour positionner le marqueur
-                const lastPoint = coords[coords.length - 1];
-                if (lastPoint) {
-                    if (!marker) {
-                        marker = L.marker(lastPoint).addTo(map);
-                        map.setView(lastPoint, 16);
-                    } else {
-                        marker.setLatLng(lastPoint);
-                        if (isViewer) map.panTo(lastPoint); // La carte suit automatiquement chez l'invité
-                    }
-                }
-
-                debugLog("Tracé à jour: " + coords.length + " points reçus.");
-            }
-        }, (err) => {
-            debugLog("Erreur de lecture: " + err.message);
+            // DÉMARRAGE DE L'ÉCOUTE
+            startListening();
+        }).catch((err) => {
+            debugLog("Erreur Auth Firebase: " + err.message);
         });
 
     } else {
-        debugLog("ERREUR: Clés Firebase absentes.");
+        debugLog("ERREUR: Clés Firebase non renseignées.");
     }
 } catch (e) {
     debugLog("Exception Init: " + e.message);
+}
+
+function startListening() {
+    if (!sessionRef) return;
+
+    sessionRef.on('value', (snapshot) => {
+        const data = snapshot.val();
+        
+        if (!data) {
+            debugLog("En attente de parcours...");
+            return;
+        }
+
+        if (data.pts) {
+            const rawPoints = Object.values(data.pts);
+            const coords = rawPoints.map(p => [p.lat, p.lng]);
+
+            polyline.setLatLngs(coords);
+
+            const lastPoint = coords[coords.length - 1];
+            if (lastPoint) {
+                if (!marker) {
+                    marker = L.marker(lastPoint).addTo(map);
+                    map.setView(lastPoint, 16);
+                } else {
+                    marker.setLatLng(lastPoint);
+                    if (isViewer) map.panTo(lastPoint);
+                }
+            }
+
+            debugLog("REÇU : " + coords.length + " points d'affichage !");
+        }
+    }, (err) => {
+        debugLog("Erreur Synchro: " + err.message);
+    });
 }
 
 // ==========================================
@@ -128,14 +132,12 @@ function startTracking() {
         return;
     }
 
-    // Réinitialisation locale
     if (polyline) polyline.setLatLngs([]);
     if (marker) {
         map.removeLayer(marker);
         marker = null;
     }
 
-    // Réinitialisation Firebase pour repartir sur une session propre
     if (sessionRef) {
         sessionRef.remove();
     }
@@ -157,7 +159,6 @@ function startTracking() {
 
             debugLog("GPS local: " + lat.toFixed(4) + ", " + lng.toFixed(4));
 
-            // Envoi à Firebase sous le nœud 'pts'
             if (sessionRef) {
                 sessionRef.child('pts').push({
                     lat: lat,
@@ -195,7 +196,7 @@ function stopTracking() {
 }
 
 // ==========================================
-// 4. FONCTION DE PARTAGE
+// 4. PARTAGE
 // ==========================================
 
 function shareTrackingLink() {
