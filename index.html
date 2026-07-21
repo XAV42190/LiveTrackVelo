@@ -3,54 +3,113 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>LiveTrack Vélo GPS</title>
-    <link rel="manifest" href="manifest.json">
-    <!-- Style pour la carte Leaflet -->
+    <title>LiveTrack Vélo</title>
+    
+    <!-- PWA Manifest -->
+    <link rel="manifest" href="./manifest.json">
+    
+    <!-- CSS Leaflet -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    
     <style>
-        body { font-family: Arial, sans-serif; margin: 0; padding: 0; display: flex; flex-direction: column; height: 100vh; }
-        #header { background: #10b981; color: white; padding: 15px; text-align: center; z-index: 1000; box-shadow: 0 2px 5px rgba(0,0,0,0.2); }
-        button { background: white; color: #10b981; border: none; padding: 10px 15px; font-weight: bold; border-radius: 5px; cursor: pointer; margin-top: 10px; font-size: 0.95em; }
-        #btn-reset { background-color: #ef4444; color: white; margin-left: 10px; }
-        #username { padding: 8px; border-radius: 5px; border: none; margin-bottom: 5px; width: 80%; max-width: 250px; font-size: 0.95em; text-align: center; }
-        #map { flex-grow: 1; width: 100%; }
-        .status { font-size: 0.95em; margin-top: 8px; color: #d1fae5; font-weight: bold; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            background-color: #f4f4f9;
+        }
+
+        /* Barre de contrôle supérieure */
+        .controls {
+            padding: 12px;
+            background: #ffffff;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+            display: flex;
+            gap: 8px;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+        }
+
+        button {
+            flex: 1;
+            max-width: 150px;
+            padding: 10px 12px;
+            font-size: 14px;
+            font-weight: bold;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: opacity 0.2s, background-color 0.2s;
+        }
+
+        #startBtn { background-color: #28a745; }
+        #stopBtn { background-color: #dc3545; opacity: 0.5; }
+        #shareBtn { background-color: #007bff; }
+
+        button:active {
+            transform: scale(0.98);
+        }
+
+        /* Conteneur de la carte Leaflet */
+        #map {
+            flex: 1;
+            width: 100%;
+        }
+
+        /* Message Toast */
+        #toast {
+            display: none;
+            position: fixed;
+            bottom: 30px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0, 0, 0, 0.85);
+            color: #fff;
+            padding: 12px 24px;
+            border-radius: 20px;
+            font-size: 14px;
+            z-index: 2000;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+        }
     </style>
 </head>
 <body>
 
-    <div id="header">
-        <h2>Mon LiveTrack Cycliste</h2>
-        <!-- Saisie du prénom/nom -->
-        <input type="text" id="username" placeholder="Votre prénom ou nom" value="Cycliste_Anonyme">
-        <br>
-        <div class="controls" style="margin: 15px 0; display: flex; gap: 10px; flex-wrap: wrap;">
-    <button id="startBtn" onclick="startTracking()" style="padding: 10px 15px; background-color: #28a745; color: white; border: none; border-radius: 5px; font-weight: bold; cursor: pointer;">
-        ▶ Démarrer le LiveTrack
-    </button>
-    
-    <button id="stopBtn" onclick="stopTracking()" disabled style="padding: 10px 15px; background-color: #dc3545; color: white; border: none; border-radius: 5px; font-weight: bold; cursor: pointer; opacity: 0.6;">
-        ⏹ Arrêter le suivi
-    </button>
-    
-    <button id="shareBtn" onclick="shareTrackingLink()" style="padding: 10px 15px; background-color: #007bff; color: white; border: none; border-radius: 5px; font-weight: bold; cursor: pointer;">
-        🔗 Partager le lien
-    </button>
-</div>
-
-<!-- Notification temporaire lors de la copie du lien (à placer juste en dessous des boutons) -->
-<div id="toast" style="display:none; position:fixed; bottom:20px; left:50%; transform:translateX(-50%); background:#333; color:#fff; padding:10px 20px; border-radius:8px; z-index:1000; font-family: sans-serif;">
-    Lien copié dans le presse-papier !
-</div>
-
-        <div id="status" class="status">Statut : Prêt à démarrer</div>
+    <!-- Barre des boutons -->
+    <div class="controls">
+        <button id="startBtn" onclick="startTracking()">▶ Démarrer</button>
+        <button id="stopBtn" onclick="stopTracking()" disabled>⏹ Arrêter</button>
+        <button id="shareBtn" onclick="shareTrackingLink()">🔗 Partager</button>
     </div>
 
-    <!-- La carte de suivi en temps réel -->
+    <!-- Emplacement de la carte -->
     <div id="map"></div>
 
-    <!-- Bibliothèques nécessaires -->
+    <!-- Notification Toast -->
+    <div id="toast">Lien copié dans le presse-papier !</div>
+
+    <!-- Scripts Leaflet -->
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-    <script type="module" src="app.js"></script>
+
+    <!-- Scripts Firebase (SDK Modulaire / Compatibility) -->
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-database-compat.js"></script>
+
+    <!-- Code principal de l'application -->
+    <script src="./app.js"></script>
+
+    <!-- Enregistrement du Service Worker pour PWA -->
+    <script>
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('./sw.js')
+                .then(() => console.log('Service Worker enregistré.'))
+                .catch(err => console.error('Erreur Service Worker :', err));
+        }
+    </script>
 </body>
 </html>
