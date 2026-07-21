@@ -4,25 +4,29 @@
 let map, marker, polyline;
 let watchId = null;
 
-// ID de Session unique
+// Détection de la session via l'URL
+const urlParams = new URLSearchParams(window.location.search);
+let sharedSessionId = urlParams.get('session');
+const isViewer = Boolean(sharedSessionId);
+
+// Si pas de session dans l'URL, on utilise/génère une session locale pour le cycliste
 let sessionId = localStorage.getItem('livetrack_session_id');
 if (!sessionId) {
     sessionId = 'session_' + Math.random().toString(36).substring(2, 9);
     localStorage.setItem('livetrack_session_id', sessionId);
 }
 
-// Détection du mode Spectateur (?session=... dans l'URL)
-const urlParams = new URLSearchParams(window.location.search);
-const sharedSessionId = urlParams.get('session');
-const isViewer = Boolean(sharedSessionId);
+// ID de session VRAIMENT actif
 const activeSessionId = isViewer ? sharedSessionId : sessionId;
 
 window.addEventListener('DOMContentLoaded', () => {
+    // Mode spectateur : masquer les boutons
     if (isViewer) {
         const controls = document.querySelector('.controls');
         if (controls) controls.style.display = 'none';
     }
 
+    // Carte
     map = L.map('map').setView([46.603354, 1.888334], 6);
 
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -30,11 +34,13 @@ window.addEventListener('DOMContentLoaded', () => {
         attribution: '© OpenStreetMap'
     }).addTo(map);
 
+    // Ligne rouge très visible
     polyline = L.polyline([], { color: '#ff0000', weight: 6, opacity: 0.9 }).addTo(map);
 
     setTimeout(() => { map.invalidateSize(); }, 300);
 });
 
+// Bandeau de débogage
 function debugLog(msg) {
     let debugBox = document.getElementById('debugBox');
     if (!debugBox) {
@@ -67,17 +73,18 @@ try {
     if (typeof firebase !== 'undefined' && firebaseConfig.databaseURL !== "VOS_VRAIES_INFOS_FIREBASE") {
         firebase.initializeApp(firebaseConfig);
         
-        // Connexion Anonyme obligatoire pour débloquer les droits
         firebase.auth().signInAnonymously().then(() => {
             database = firebase.database();
+            
+            // Pointer exactement sur le bon nœud
             sessionRef = database.ref('livetrack/sessions/' + activeSessionId);
 
             debugLog("Auth OK (" + (isViewer ? "Invité" : "Cycliste") + ") ID: " + activeSessionId);
 
-            // DÉMARRAGE DE L'ÉCOUTE
+            // Écouter directement le sous-nœud 'pts'
             startListening();
         }).catch((err) => {
-            debugLog("Erreur Auth Firebase: " + err.message);
+            debugLog("Erreur Auth: " + err.message);
         });
 
     } else {
@@ -90,33 +97,35 @@ try {
 function startListening() {
     if (!sessionRef) return;
 
-    sessionRef.on('value', (snapshot) => {
+    // Écoute spécifique sur 'pts'
+    sessionRef.child('pts').on('value', (snapshot) => {
         const data = snapshot.val();
         
         if (!data) {
-            debugLog("En attente de parcours...");
+            debugLog("Connecté (" + (isViewer ? "Invité" : "Cycliste") + ") - En attente de points GPS...");
             return;
         }
 
-        if (data.pts) {
-            const rawPoints = Object.values(data.pts);
-            const coords = rawPoints.map(p => [p.lat, p.lng]);
+        // Conversion des points Firebase en coordonnées [lat, lng]
+        const rawPoints = Object.values(data);
+        const coords = rawPoints.map(p => [p.lat, p.lng]);
 
-            polyline.setLatLngs(coords);
+        // Redessiner la ligne
+        polyline.setLatLngs(coords);
 
-            const lastPoint = coords[coords.length - 1];
-            if (lastPoint) {
-                if (!marker) {
-                    marker = L.marker(lastPoint).addTo(map);
-                    map.setView(lastPoint, 16);
-                } else {
-                    marker.setLatLng(lastPoint);
-                    if (isViewer) map.panTo(lastPoint);
-                }
+        // Mettre à jour le marqueur
+        const lastPoint = coords[coords.length - 1];
+        if (lastPoint) {
+            if (!marker) {
+                marker = L.marker(lastPoint).addTo(map);
+                map.setView(lastPoint, 16);
+            } else {
+                marker.setLatLng(lastPoint);
+                if (isViewer) map.panTo(lastPoint);
             }
-
-            debugLog("REÇU : " + coords.length + " points d'affichage !");
         }
+
+        debugLog("SUIVI ACTIF : " + coords.length + " points reçus !");
     }, (err) => {
         debugLog("Erreur Synchro: " + err.message);
     });
@@ -132,12 +141,14 @@ function startTracking() {
         return;
     }
 
+    // Réinitialiser la carte locale
     if (polyline) polyline.setLatLngs([]);
     if (marker) {
         map.removeLayer(marker);
         marker = null;
     }
 
+    // Effacer l'ancienne session sur Firebase pour repartir à zéro
     if (sessionRef) {
         sessionRef.remove();
     }
@@ -150,7 +161,7 @@ function startTracking() {
     stopBtn.disabled = false;
     stopBtn.style.opacity = '1';
 
-    debugLog("Recherche GPS...");
+    debugLog("Recherche signal GPS...");
 
     watchId = navigator.geolocation.watchPosition(
         (position) => {
@@ -159,6 +170,7 @@ function startTracking() {
 
             debugLog("GPS local: " + lat.toFixed(4) + ", " + lng.toFixed(4));
 
+            // Envoi explicite à Firebase
             if (sessionRef) {
                 sessionRef.child('pts').push({
                     lat: lat,
@@ -172,7 +184,7 @@ function startTracking() {
         },
         {
             enableHighAccuracy: true,
-            maximumAge: 2000,
+            maximumAge: 1000,
             timeout: 10000
         }
     );
@@ -200,7 +212,8 @@ function stopTracking() {
 // ==========================================
 
 function shareTrackingLink() {
-    const shareUrl = window.location.origin + window.location.pathname + '?session=' + sessionId;
+    // Génère le lien exact basé sur activeSessionId
+    const shareUrl = window.location.origin + window.location.pathname + '?session=' + activeSessionId;
 
     const shareData = {
         title: 'Suivi vélo en direct 🚴‍♂️',
