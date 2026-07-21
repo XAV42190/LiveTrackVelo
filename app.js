@@ -57,13 +57,14 @@ window.addEventListener('DOMContentLoaded', () => {
     setupEventListeners();
 });
 
-// Affiche un bandeau d'information visuel pour le suivi
+// Affiche un bandeau d'information visuel en HAUT de l'écran
 function debugLog(msg) {
     let debugBox = document.getElementById('debugBox');
     if (!debugBox) {
         debugBox = document.createElement('div');
         debugBox.id = 'debugBox';
-        debugBox.style.cssText = 'position:fixed;bottom:10px;left:10px;right:10px;background:rgba(0,0,0,0.85);color:#00ff00;font-family:monospace;font-size:12px;padding:8px;border-radius:5px;z-index:9999;word-break:break-all;max-height:80px;overflow-y:auto;';
+        // Repositionné en haut : top: 10px au lieu de bottom: 10px
+        debugBox.style.cssText = 'position:fixed;top:10px;left:10px;right:10px;background:rgba(0,0,0,0.85);color:#00ff00;font-family:monospace;font-size:12px;padding:8px;border-radius:5px;z-index:9999;word-break:break-all;max-height:80px;overflow-y:auto;';
         document.body.appendChild(debugBox);
     }
     debugBox.innerText = msg;
