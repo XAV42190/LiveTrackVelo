@@ -7,10 +7,6 @@
     
     <!-- Leaflet CSS -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-    
-    <!-- Firebase SDK Compat v9 -->
-    <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-app-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-auth-compat.js"></script>
 
     <style>
         body { margin: 0; padding: 0; font-family: Arial, sans-serif; }
@@ -25,8 +21,8 @@
             box-sizing: border-box;
         }
         button {
-            padding: 10px 14px;
-            font-size: 14px;
+            padding: 10px 12px;
+            font-size: 13px;
             font-weight: bold;
             border: none;
             border-radius: 6px;
@@ -37,23 +33,25 @@
         #shareBtn { background: #007bff; color: white; }
         #pocketBtn { background: #343a40; color: white; display: none; }
 
-        /* Style de l'écran noir Mode Poche */
+        /* Écran noir Mode Poche */
         #blackOverlay {
-            display: none;
+            display: none; /* Masqué par défaut */
             position: fixed;
             top: 0;
             left: 0;
             width: 100vw;
             height: 100vh;
-            background: #000000;
+            background-color: #000000;
             color: #ffffff;
             z-index: 99999;
-            text-align: center;
-            padding-top: 45vh;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
             font-size: 20px;
             font-weight: bold;
-            box-sizing: border-box;
+            text-align: center;
             user-select: none;
+            box-sizing: border-box;
         }
 
         /* Message Toast */
@@ -85,7 +83,7 @@
         <button id="pocketBtn">📱 Mode Poche</button>
     </div>
 
-    <!-- ÉCRAN NOIR POUR MODE POCHE -->
+    <!-- MASQUE NOIR POUR MODE POCHE -->
     <div id="blackOverlay">
         🔒 ÉCRAN VERROUILLÉ<br><br>
         <small style="font-size: 14px; font-weight: normal; opacity: 0.8;">Touchez l'écran pour déverrouiller</small>
@@ -94,7 +92,11 @@
     <!-- NOTIFICATION TOAST -->
     <div id="toast">Lien invité copié !</div>
 
-    <!-- VIDÉO ARRIÈRE-PLAN (Forcer GPS actif sur Android/Chrome) -->
+    <!-- ÉLÉMENTS AUDIO & VIDÉO ANTI-VEILLE -->
+    <audio id="silentAudio" loop style="display:none;">
+        <source src="data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=" type="audio/wav">
+    </audio>
+
     <video id="silentVideo" playsinline loop muted style="display:none; width:1px; height:1px;">
         <source src="data:video/mp4;base64,AAAAIGZ0eXBpc29tAAACAGlzb21pc28yYXZjMW1wNDEAAAAIZnJlZQAAAAdtZGF0AAAAAA==" type="video/mp4">
     </video>
