@@ -15,18 +15,26 @@
         #username { padding: 8px; border-radius: 5px; border: none; margin-bottom: 5px; width: 80%; max-width: 250px; font-size: 0.95em; text-align: center; }
         #map { flex-grow: 1; width: 100%; }
         .status { font-size: 0.95em; margin-top: 8px; color: #d1fae5; font-weight: bold; }
+        .gps-option { margin-top: 10px; font-size: 0.85em; background: rgba(0,0,0,0.1); padding: 5px; border-radius: 4px; display: inline-block; }
     </style>
 </head>
 <body>
 
     <div id="header">
         <h2>Mon LiveTrack Cycliste</h2>
-        <!-- Configuration du profil du cycliste -->
+        <!-- Identification du cycliste -->
         <input type="text" id="username" placeholder="Votre prénom ou nom" value="Cycliste_Anonyme">
         <br>
         <button id="btn-connect">Connecter mon compteur GPS</button>
         <button id="btn-reset">Nouvelle Sortie</button>
         
+        <br>
+        <!-- Option pour assurer le suivi avec les compteurs comme Geoid -->
+        <div class="gps-option">
+            <input type="checkbox" id="use-phone-gps" checked>
+            <label for="use-phone-gps">Activer GPS de secours du téléphone (Requis Geoid)</label>
+        </div>
+
         <div id="status" class="status">Statut : Initialisation...</div>
     </div>
 
