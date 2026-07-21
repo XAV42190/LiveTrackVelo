@@ -52,6 +52,9 @@ window.addEventListener('DOMContentLoaded', () => {
     } else {
         debugLog("CYCLISTE : Prêt (Session " + activeSessionId + ")");
     }
+
+    // Initialiser les clics des boutons
+    setupEventListeners();
 });
 
 // Affiche un bandeau d'information visuel pour le suivi
@@ -70,7 +73,6 @@ function debugLog(msg) {
 // 3. GESTION DE L'ANTI-VEILLE ET AUDIO
 // ==========================================
 
-// Empêche la mise en veille du système / processeur via Audio
 function startSilentAudio() {
     const audio = document.getElementById('silentAudio');
     if (audio) {
@@ -90,7 +92,22 @@ function stopSilentAudio() {
     }
 }
 
-// Empêche l'écran de s'éteindre (si supporté par le navigateur)
+function startAntiSleep() {
+    const video = document.getElementById('silentVideo');
+    if (video) {
+        video.play().then(() => {
+            debugLog("Anti-veille vidéo actif 🎥 (GPS forcé)");
+        }).catch(err => console.log("Erreur vidéo:", err));
+    }
+}
+
+function stopAntiSleep() {
+    const video = document.getElementById('silentVideo');
+    if (video) {
+        video.pause();
+    }
+}
+
 async function requestWakeLock() {
     try {
         if ('wakeLock' in navigator) {
@@ -155,9 +172,11 @@ function startTracking() {
     }
 
     // 1. Activer les dispositifs anti-mise en veille
-    startAntiSleep(); // <--- Lance la vidéo
+    startAntiSleep();
+    startSilentAudio();
     requestWakeLock();
-    // 2. 🚀 NOUVEAU : Déclencher automatiquement le partage de lien
+
+    // 2. Déclencher automatiquement le partage de lien
     shareTrackingLink();
     
     // 3. Réinitialisation des traces locales
@@ -177,13 +196,19 @@ function startTracking() {
     const startBtn = document.getElementById('startBtn');
     const stopBtn = document.getElementById('stopBtn');
     
-    startBtn.disabled = true;
-    startBtn.style.opacity = '0.5';
-    stopBtn.disabled = false;
-    stopBtn.style.opacity = '1';
+    if (startBtn) {
+        startBtn.disabled = true;
+        startBtn.style.opacity = '0.5';
+    }
+    if (stopBtn) {
+        stopBtn.disabled = false;
+        stopBtn.style.opacity = '1';
+    }
+
     // Afficher le bouton Mode Poche au démarrage
     const pocketBtn = document.getElementById('pocketBtn');
     if (pocketBtn) pocketBtn.style.display = 'inline-block';
+    
     debugLog("Recherche du signal GPS...");
 
     // 6. Lancement de la géolocalisation continue
@@ -236,31 +261,34 @@ function stopTracking() {
 
         // Désactiver l'anti-veille audio et écran
         stopSilentAudio();
-        stopAntiSleep(); // <--- Stoppe la vidéo
+        stopAntiSleep();
         releaseWakeLock();
 
         // Rétablir les boutons
         const startBtn = document.getElementById('startBtn');
         const stopBtn = document.getElementById('stopBtn');
         
-        startBtn.disabled = false;
-        startBtn.style.opacity = '1';
-        stopBtn.disabled = true;
-        stopBtn.style.opacity = '0.5';
-        // Masquer le bouton Mode Poche à l'arrêt
-       const pocketBtn = document.getElementById('pocketBtn');
+        if (startBtn) {
+            startBtn.disabled = false;
+            startBtn.style.opacity = '1';
+        }
+        if (stopBtn) {
+            stopBtn.disabled = true;
+            stopBtn.style.opacity = '0.5';
+        }
+
+        // Masquer le bouton Mode Poche et l'overlay à l'arrêt
+        const pocketBtn = document.getElementById('pocketBtn');
         const overlay = document.getElementById('blackOverlay');
         if (pocketBtn) pocketBtn.style.display = 'none';
         if (overlay) overlay.style.display = 'none';
+        
         debugLog("Suivi arrêté.");
     }
 }
 
-// ==========================================
-// 6. FONCTION DE PARTAGE DE LIEN
-// ==========================================
 function shareTrackingLink() {
-    const shareUrl = window.location.origin + window.location.pathname + '?session=' + sessionId;
+    const shareUrl = window.location.origin + window.location.pathname + '?session=' + activeSessionId;
 
     const shareData = {
         title: 'Suivi vélo en direct 🚴‍♂️',
@@ -287,30 +315,34 @@ function showToast(message) {
         setTimeout(() => { toast.style.display = "none"; }, 3000);
     }
 }
-// Lance la vidéo invisible pour forcer le maintien du GPS par Android
-function startAntiSleep() {
-    const video = document.getElementById('silentVideo');
-    if (video) {
-        video.play().then(() => {
-            debugLog("Anti-veille vidéo actif 🎥 (GPS forcé)");
-        }).catch(err => console.log("Erreur vidéo:", err));
-    }
-}
 
-function stopAntiSleep() {
-    const video = document.getElementById('silentVideo');
-    if (video) {
-        video.pause();
-    }
-}
+// TOGGLE MODE POCHE
 function togglePocketMode() {
     const overlay = document.getElementById('blackOverlay');
     if (!overlay) return;
 
-    // Si le masque est caché (ou vide), on l'affiche en plein écran
     if (overlay.style.display === 'none' || overlay.style.display === '') {
         overlay.style.display = 'flex';
     } else {
         overlay.style.display = 'none';
     }
+}
+
+// ==========================================
+// 6. DÉCLENCHEURS DES BOUTONS (EVENT LISTENERS)
+// ==========================================
+function setupEventListeners() {
+    const startBtn = document.getElementById('startBtn');
+    const stopBtn = document.getElementById('stopBtn');
+    const shareBtn = document.getElementById('shareBtn');
+    const pocketBtn = document.getElementById('pocketBtn');
+    const blackOverlay = document.getElementById('blackOverlay');
+
+    if (startBtn) startBtn.addEventListener('click', startTracking);
+    if (stopBtn) stopBtn.addEventListener('click', stopTracking);
+    if (shareBtn) shareBtn.addEventListener('click', shareTrackingLink);
+    
+    // Écouteurs Mode Poche
+    if (pocketBtn) pocketBtn.addEventListener('click', togglePocketMode);
+    if (blackOverlay) blackOverlay.addEventListener('click', togglePocketMode);
 }
