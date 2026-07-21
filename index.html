@@ -15,14 +15,14 @@
         * {
             box-sizing: border-box;
         }
-        body, html {
+        html, body {
             margin: 0;
             padding: 0;
             width: 100%;
             height: 100%;
             display: flex;
             flex-direction: column;
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
             background-color: #f4f4f9;
         }
 
@@ -47,25 +47,21 @@
             border: none;
             border-radius: 6px;
             cursor: pointer;
-            transition: opacity 0.2s;
         }
 
         #startBtn { background-color: #28a745; }
         #stopBtn { background-color: #dc3545; opacity: 0.5; }
         #shareBtn { background-color: #007bff; }
 
-        button:active {
-            transform: scale(0.98);
-        }
-
-        /* Carte de géolocalisation */
+        /* Conteneur de la carte avec hauteur explicite */
         #map {
             flex: 1;
             width: 100%;
-            height: 100%;
+            height: calc(100vh - 60px);
+            background-color: #e5e3df; /* Couleur de fond pour éviter l'écran blanc */
         }
 
-        /* Pop-up de notification */
+        /* Pop-up Toast */
         #toast {
             display: none;
             position: fixed;
@@ -78,7 +74,6 @@
             border-radius: 20px;
             font-size: 14px;
             z-index: 2000;
-            box-shadow: 0 4px 10px rgba(0,0,0,0.3);
             text-align: center;
         }
     </style>
@@ -98,14 +93,14 @@
     <!-- Leaflet JS -->
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
-    <!-- Firebase JS (version compatibilité garantie) -->
+    <!-- Firebase JS (compatibilité) -->
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-database-compat.js"></script>
 
     <!-- Application JS -->
     <script src="./app.js"></script>
 
-    <!-- Service Worker PWA -->
+    <!-- Registration Service Worker -->
     <script>
         if ('serviceWorker' in navigator) {
             navigator.serviceWorker.register('./sw.js')
