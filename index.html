@@ -22,7 +22,7 @@
             font-family: Arial, sans-serif; 
         }
 
-        /* La carte prend TOUT l'écran en arrière-plan */
+        /* La carte prend TOUT l'écran */
         #map { 
             position: absolute;
             top: 0;
@@ -30,6 +30,35 @@
             width: 100vw; 
             height: 100vh; 
             z-index: 1;
+        }
+
+        /* BARRE DE STATISTIQUES SPECTATEUR (En haut de l'écran) */
+        .stats-bar {
+            position: fixed;
+            top: 10px;
+            left: 50%;
+            transform: translateX(-50%);
+            display: flex;
+            gap: 15px;
+            background: rgba(0, 0, 0, 0.85);
+            color: #ffffff;
+            padding: 8px 16px;
+            border-radius: 20px;
+            z-index: 9000;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+            font-size: 13px;
+            font-weight: bold;
+            backdrop-filter: blur(4px);
+        }
+
+        .stat-item {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+
+        .stat-item span {
+            color: #28a745; /* Couleur verte accentuée */
         }
 
         /* La barre de boutons est FORCÉE tout en bas de l'écran */
@@ -44,7 +73,7 @@
             align-items: center; 
             background: rgba(248, 249, 250, 0.95); 
             padding: 0 10px;
-            z-index: 9000; /* Toujours au-dessus de la carte */
+            z-index: 9000;
             box-shadow: 0 -2px 10px rgba(0,0,0,0.2);
         }
 
@@ -88,7 +117,7 @@
         #toast {
             display: none;
             position: fixed;
-            top: 20px;
+            top: 60px;
             left: 50%;
             transform: translateX(-50%);
             background: #333;
@@ -105,7 +134,14 @@
     <!-- CARTE LEAFLET -->
     <div id="map"></div>
 
-    <!-- BOUTONS DE CONTRÔLE (Ancrés en bas) -->
+    <!-- BARRE DE STATISTIQUES (KM, VITESSE MOYENNE, DÉNIVELÉ) -->
+    <div id="statsBar" class="stats-bar">
+        <div class="stat-item">📏 <span id="statDistance">0.0</span> km</div>
+        <div class="stat-item">⚡ <span id="statAvgSpeed">0.0</span> km/h</div>
+        <div class="stat-item">⛰️ <span id="statElevation">0</span> m d+</div>
+    </div>
+
+    <!-- BOUTONS DE CONTRÔLE -->
     <div class="controls">
         <button id="startBtn">▶ Démarrer</button>
         <button id="stopBtn" disabled>⏹ Arrêter</button>
@@ -136,50 +172,10 @@
     
     <!-- Application JS -->
     <script src="app.js"></script>
-    
-    <!-- SCRIPT DE NETTOYAGE ET FILTRAGE DES POINTS CÔTÉ SPECTATEUR -->
     <script>
       if ('serviceWorker' in navigator) {
         navigator.serviceWorker.register('sw.js');
       }
-
-      /**
-       * Fonction utilitaire à utiliser dans app.js pour nettoyer
-       * les points Firebase avant de dessiner la polyline
-       */
-      window.cleanAndSortPoints = function(rawPointsObject) {
-        if (!rawPointsObject) return [];
-
-        // 1. Convertir l'objet Firebase en Tableau
-        let pointsArray = Object.values(rawPointsObject).filter(pt => pt && pt.lat && pt.lng);
-
-        // 2. Tri chronologique par timestamp (Empêche l'effet toile d'araignée)
-        pointsArray.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
-
-        // 3. Filtrage des points abérrants / sauts GPS
-        let cleanedPoints = [];
-        let lastValidPt = null;
-
-        pointsArray.forEach(pt => {
-          // Filtre 1 : Mauvaise précision (> 50 mètres)
-          if (pt.accuracy && pt.accuracy > 50) return;
-
-          // Filtre 2 : Saut GPS trop important (> 500m par rapport au point valide précédent)
-          if (lastValidPt) {
-            let latLngPrev = L.latLng(lastValidPt.lat, lastValidPt.lng);
-            let latLngCurr = L.latLng(pt.lat, pt.lng);
-            let dist = latLngPrev.distanceTo(latLngCurr);
-
-            // Si le saut est aberrant, on zap ce point
-            if (dist > 500) return; 
-          }
-
-          cleanedPoints.push(pt);
-          lastValidPt = pt;
-        });
-
-        return cleanedPoints;
-      };
     </script>
 </body>
 </html>
