@@ -122,36 +122,31 @@ function fetchPointsFromFirebase() {
                 return;
             }
 
-            // 1. Conversion et tri chronologique strict
             let rawPoints = Object.values(data).filter(p => p && p.lat !== undefined && p.lng !== undefined);
             rawPoints.sort((a, b) => (a.timestamp || a.t || 0) - (b.timestamp || b.t || 0));
 
-            // 2. Filtrage des anomalies + Calcul des Stats (Distance, D+, Vitesse)
             let cleanedPoints = [];
             let totalDistanceMeters = 0;
             let totalElevationGain = 0;
             let lastValidPt = null;
 
             rawPoints.forEach(p => {
-                if (p.accuracy && p.accuracy > 50) return; // Précision médiocre
+                if (p.accuracy && p.accuracy > 50) return; 
 
                 if (lastValidPt) {
                     const prevLatLng = L.latLng(lastValidPt.lat, lastValidPt.lng);
                     const currLatLng = L.latLng(p.lat, p.lng);
                     const distStep = prevLatLng.distanceTo(currLatLng);
 
-                    // Filtre saut aberrant (> 500m)
                     if (distStep > 500) return;
 
                     totalDistanceMeters += distStep;
 
-                    // Calcul du Dénivelé Positif (D+)
                     const prevAlt = lastValidPt.alt !== undefined ? lastValidPt.alt : lastValidPt.altitude;
                     const currAlt = p.alt !== undefined ? p.alt : p.altitude;
 
                     if (prevAlt !== undefined && currAlt !== undefined) {
                         const eleDiff = currAlt - prevAlt;
-                        // Seuil minimal de 2 mètres pour filtrer le bruit altimétrique du GPS
                         if (eleDiff > 2) {
                             totalElevationGain += eleDiff;
                         }
@@ -165,7 +160,6 @@ function fetchPointsFromFirebase() {
             const coords = cleanedPoints.map(p => [p.lat, p.lng]);
             polyline.setLatLngs(coords);
 
-            // Mise à jour du marqueur
             const lastPoint = coords[coords.length - 1];
             if (lastPoint) {
                 if (!marker) {
@@ -177,27 +171,23 @@ function fetchPointsFromFirebase() {
                 }
             }
 
-            // Calcul de la Vitesse Moyenne (km/h)
             let avgSpeed = 0;
             if (cleanedPoints.length > 1) {
                 const startTime = cleanedPoints[0].timestamp || cleanedPoints[0].t;
                 const endTime = cleanedPoints[cleanedPoints.length - 1].timestamp || cleanedPoints[cleanedPoints.length - 1].t;
-                const totalTimeHours = (endTime - startTime) / (1000 * 3600); // Conversion ms -> Heures
+                const totalTimeHours = (endTime - startTime) / (1000 * 3600); 
 
                 if (totalTimeHours > 0) {
                     avgSpeed = (totalDistanceMeters / 1000) / totalTimeHours;
                 }
             }
 
-            // Mise à jour de l'affichage en haut de la carte
             updateStatsDisplay(totalDistanceMeters / 1000, avgSpeed, totalElevationGain);
-
             debugLog("SPECTATEUR : " + coords.length + " points affichés !");
         })
         .catch(err => debugLog("Erreur Réseau Spectateur: " + err.message));
 }
 
-// Fonction pour mettre à jour la barre UI
 function updateStatsDisplay(distanceKm, avgSpeedKmH, elevationMeters) {
     const elDist = document.getElementById('statDistance');
     const elSpeed = document.getElementById('statAvgSpeed');
@@ -252,9 +242,10 @@ function addCommentToMap(comment) {
 
     let popupContent = `<div style="text-align:center; min-width: 120px;"><b>Message (${timeStr}) :</b><br>${comment.text || ''}`;
     if (hasPhoto) {
-        popupContent += `<br><a href="${comment.photo}" target="_blank">
-          <img src="${comment.photo}" style="max-width:200px; max-height:200px; border-radius:8px; margin-top:8px; border: 1px solid #ccc; object-fit: cover;" />
-        </a>`;
+        // --- NOUVEAU : On appelle la fonction openImageModal() au clic sur la photo ---
+        popupContent += `<br>
+          <img src="${comment.photo}" onclick="openImageModal(this.src)" style="max-width:200px; max-height:200px; border-radius:8px; margin-top:8px; border: 1px solid #ccc; object-fit: cover; cursor: pointer;" title="Cliquez pour agrandir" />
+        `;
     }
     popupContent += `</div>`;
 
@@ -375,7 +366,7 @@ function startTracking() {
         (position) => {
             const lat = position.coords.latitude;
             const lng = position.coords.longitude;
-            const alt = position.coords.altitude || 0; // Altitude pour le dénivelé
+            const alt = position.coords.altitude || 0; 
             const accuracy = Math.round(position.coords.accuracy || 0);
 
             if (accuracy > 50) return;
@@ -464,7 +455,26 @@ function togglePocketMode() {
 }
 
 // ==========================================
-// 7. LISTENERS
+// 8. FONCTIONS POUR LE MODAL D'IMAGE
+// ==========================================
+function openImageModal(imgSrc) {
+    const modal = document.getElementById('imageModal');
+    const modalImg = document.getElementById('fullSizeImage');
+    if (modal && modalImg) {
+        modalImg.src = imgSrc;
+        modal.style.display = "flex"; // Affiche en Flexbox pour centrer
+    }
+}
+
+function closeImageModal() {
+    const modal = document.getElementById('imageModal');
+    if (modal) {
+        modal.style.display = "none";
+    }
+}
+
+// ==========================================
+// 9. LISTENERS
 // ==========================================
 function setupEventListeners() {
     const startBtn = document.getElementById('startBtn');
