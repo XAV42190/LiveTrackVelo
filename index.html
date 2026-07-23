@@ -136,11 +136,50 @@
     
     <!-- Application JS -->
     <script src="app.js"></script>
-    <script>
-  if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('sw.js');
-  }
-</script>
     
+    <!-- SCRIPT DE NETTOYAGE ET FILTRAGE DES POINTS CÔTÉ SPECTATEUR -->
+    <script>
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.register('sw.js');
+      }
+
+      /**
+       * Fonction utilitaire à utiliser dans app.js pour nettoyer
+       * les points Firebase avant de dessiner la polyline
+       */
+      window.cleanAndSortPoints = function(rawPointsObject) {
+        if (!rawPointsObject) return [];
+
+        // 1. Convertir l'objet Firebase en Tableau
+        let pointsArray = Object.values(rawPointsObject).filter(pt => pt && pt.lat && pt.lng);
+
+        // 2. Tri chronologique par timestamp (Empêche l'effet toile d'araignée)
+        pointsArray.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
+
+        // 3. Filtrage des points abérrants / sauts GPS
+        let cleanedPoints = [];
+        let lastValidPt = null;
+
+        pointsArray.forEach(pt => {
+          // Filtre 1 : Mauvaise précision (> 50 mètres)
+          if (pt.accuracy && pt.accuracy > 50) return;
+
+          // Filtre 2 : Saut GPS trop important (> 500m par rapport au point valide précédent)
+          if (lastValidPt) {
+            let latLngPrev = L.latLng(lastValidPt.lat, lastValidPt.lng);
+            let latLngCurr = L.latLng(pt.lat, pt.lng);
+            let dist = latLngPrev.distanceTo(latLngCurr);
+
+            // Si le saut est aberrant, on zap ce point
+            if (dist > 500) return; 
+          }
+
+          cleanedPoints.push(pt);
+          lastValidPt = pt;
+        });
+
+        return cleanedPoints;
+      };
+    </script>
 </body>
 </html>
