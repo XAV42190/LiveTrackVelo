@@ -6,11 +6,11 @@ const FIREBASE_DB_URL = "https://suivisortievelo-default-rtdb.europe-west1.fireb
 let map, marker, polyline;
 let watchId = null;
 let viewerInterval = null;
-let commentsInterval = null; // Stocke le timer des commentaires
+let commentsInterval = null;
 let localPath = [];
 let wakeLock = null;
-let displayedCommentIds = new Set(); // Évite d'afficher deux fois le même commentaire
-let currentPhotoBase64 = null; // Stocke la photo sélectionnée/compressée
+let displayedCommentIds = new Set();
+let currentPhotoBase64 = null;
 
 // Détection de la session et du rôle (Spectateur vs Cycliste)
 const urlParams = new URLSearchParams(window.location.search);
@@ -29,13 +29,11 @@ const activeSessionId = isViewer ? sharedSessionId : sessionId;
 // 2. INITIALISATION CARTE & APPLICATION
 // ==========================================
 window.addEventListener('DOMContentLoaded', () => {
-    // Si c'est un spectateur, masquer les boutons de contrôle
     if (isViewer) {
         const controls = document.querySelector('.controls');
         if (controls) controls.style.display = 'none';
     }
 
-    // Initialisation de Leaflet
     map = L.map('map').setView([46.603354, 1.888334], 6);
 
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -47,7 +45,6 @@ window.addEventListener('DOMContentLoaded', () => {
 
     setTimeout(() => { map.invalidateSize(); }, 300);
 
-    // Mode Spectateur vs Cycliste
     if (isViewer) {
         debugLog("SPECTATEUR : Connexion à la session " + activeSessionId);
         fetchPointsFromFirebase();
@@ -56,15 +53,12 @@ window.addEventListener('DOMContentLoaded', () => {
         debugLog("CYCLISTE : Prêt (Session " + activeSessionId + ")");
     }
 
-    // === Chargement initial et écoute périodique des commentaires ===
     fetchCommentsFromFirebase();
     commentsInterval = setInterval(fetchCommentsFromFirebase, 4000);
 
-    // Initialiser les clics des boutons
     setupEventListeners();
 });
 
-// Affiche un bandeau d'information visuel en HAUT de l'écran
 function debugLog(msg) {
     let debugBox = document.getElementById('debugBox');
     if (!debugBox) {
@@ -77,42 +71,28 @@ function debugLog(msg) {
 }
 
 // ==========================================
-// 3. GESTION DE L'ANTI-VEILLE ET AUDIO
+// 3. ANTI-VEILLE ET AUDIO
 // ==========================================
-
 function startSilentAudio() {
     const audio = document.getElementById('silentAudio');
     if (audio) {
-        audio.play().then(() => {
-            debugLog("Audio silencieux actif 🎧 (Anti-veille JS)");
-        }).catch(err => {
-            console.log("Erreur lecture audio:", err);
-        });
+        audio.play().then(() => debugLog("Audio silencieux actif 🎧")).catch(err => console.log("Audio err:", err));
     }
 }
 
 function stopSilentAudio() {
     const audio = document.getElementById('silentAudio');
-    if (audio) {
-        audio.pause();
-        audio.currentTime = 0;
-    }
+    if (audio) { audio.pause(); audio.currentTime = 0; }
 }
 
 function startAntiSleep() {
     const video = document.getElementById('silentVideo');
-    if (video) {
-        video.play().then(() => {
-            debugLog("Anti-veille vidéo actif 🎥 (GPS forcé)");
-        }).catch(err => console.log("Erreur vidéo:", err));
-    }
+    if (video) video.play().then(() => debugLog("Anti-veille vidéo actif 🎥")).catch(err => console.log("Vidéo err:", err));
 }
 
 function stopAntiSleep() {
     const video = document.getElementById('silentVideo');
-    if (video) {
-        video.pause();
-    }
+    if (video) video.pause();
 }
 
 async function requestWakeLock() {
@@ -120,24 +100,14 @@ async function requestWakeLock() {
         if ('wakeLock' in navigator) {
             wakeLock = await navigator.wakeLock.request('screen');
             debugLog("Anti-veille Écran : ACTIF 💡");
-            
-            wakeLock.addEventListener('release', () => {
-                debugLog("Anti-veille relâché");
-            });
         }
     } catch (err) {
-        debugLog("WakeLock non supporté ou refusé par le navigateur");
+        debugLog("WakeLock non supporté");
     }
 }
 
-document.addEventListener('visibilitychange', async () => {
-    if (wakeLock !== null && document.visibilityState === 'visible') {
-        await requestWakeLock();
-    }
-});
-
 // ==========================================
-// 4. REQUÊTES FIREBASE REST (DONNÉES & COMMENTAIRES)
+// 4. REQUÊTES FIREBASE & CALCUL DES STATISTIQUES
 // ==========================================
 function fetchPointsFromFirebase() {
     const url = `${FIREBASE_DB_URL}/livetrack/sessions/${activeSessionId}/pts.json`;
@@ -147,44 +117,54 @@ function fetchPointsFromFirebase() {
         .then(data => {
             if (!data) {
                 debugLog("SPECTATEUR : En attente du départ du vélo...");
+                updateStatsDisplay(0, 0, 0);
                 return;
             }
 
-            // 1. Conversion en tableau et filtrage basique
+            // 1. Conversion et tri chronologique strict
             let rawPoints = Object.values(data).filter(p => p && p.lat !== undefined && p.lng !== undefined);
+            rawPoints.sort((a, b) => (a.timestamp || a.t || 0) - (b.timestamp || b.t || 0));
 
-            // 2. TRI CHRONOLOGIQUE STRICT par timestamp/t (Corrige les toiles d'araignées)
-            rawPoints.sort((a, b) => {
-                const timeA = a.timestamp || a.t || 0;
-                const timeB = b.timestamp || b.t || 0;
-                return timeA - timeB;
-            });
-
-            // 3. FILTRAGE DES ANOMALIES GPS (Précision et Sauts de téléportation)
+            // 2. Filtrage des anomalies + Calcul des Stats (Distance, D+, Vitesse)
             let cleanedPoints = [];
-            let lastValidPoint = null;
+            let totalDistanceMeters = 0;
+            let totalElevationGain = 0;
+            let lastValidPt = null;
 
             rawPoints.forEach(p => {
-                // Ignore si précision trop médiocre (> 50m)
-                if (p.accuracy && p.accuracy > 50) return;
+                if (p.accuracy && p.accuracy > 50) return; // Précision médiocre
 
-                // Ignore si saut aberrant (> 500m)
-                if (lastValidPoint) {
-                    const prevLatLng = L.latLng(lastValidPoint.lat, lastValidPoint.lng);
+                if (lastValidPt) {
+                    const prevLatLng = L.latLng(lastValidPt.lat, lastValidPt.lng);
                     const currLatLng = L.latLng(p.lat, p.lng);
-                    if (prevLatLng.distanceTo(currLatLng) > 500) {
-                        return; 
+                    const distStep = prevLatLng.distanceTo(currLatLng);
+
+                    // Filtre saut aberrant (> 500m)
+                    if (distStep > 500) return;
+
+                    totalDistanceMeters += distStep;
+
+                    // Calcul du Dénivelé Positif (D+)
+                    const prevAlt = lastValidPt.alt !== undefined ? lastValidPt.alt : lastValidPt.altitude;
+                    const currAlt = p.alt !== undefined ? p.alt : p.altitude;
+
+                    if (prevAlt !== undefined && currAlt !== undefined) {
+                        const eleDiff = currAlt - prevAlt;
+                        // Seuil minimal de 2 mètres pour filtrer le bruit altimétrique du GPS
+                        if (eleDiff > 2) {
+                            totalElevationGain += eleDiff;
+                        }
                     }
                 }
 
                 cleanedPoints.push(p);
-                lastValidPoint = p;
+                lastValidPt = p;
             });
 
             const coords = cleanedPoints.map(p => [p.lat, p.lng]);
-
             polyline.setLatLngs(coords);
 
+            // Mise à jour du marqueur
             const lastPoint = coords[coords.length - 1];
             if (lastPoint) {
                 if (!marker) {
@@ -196,11 +176,35 @@ function fetchPointsFromFirebase() {
                 }
             }
 
-            debugLog("SPECTATEUR : " + coords.length + " points affichés sur la carte !");
+            // Calcul de la Vitesse Moyenne (km/h)
+            let avgSpeed = 0;
+            if (cleanedPoints.length > 1) {
+                const startTime = cleanedPoints[0].timestamp || cleanedPoints[0].t;
+                const endTime = cleanedPoints[cleanedPoints.length - 1].timestamp || cleanedPoints[cleanedPoints.length - 1].t;
+                const totalTimeHours = (endTime - startTime) / (1000 * 3600); // Conversion ms -> Heures
+
+                if (totalTimeHours > 0) {
+                    avgSpeed = (totalDistanceMeters / 1000) / totalTimeHours;
+                }
+            }
+
+            // Mise à jour de l'affichage en haut de la carte
+            updateStatsDisplay(totalDistanceMeters / 1000, avgSpeed, totalElevationGain);
+
+            debugLog("SPECTATEUR : " + coords.length + " points affichés !");
         })
-        .catch(err => {
-            debugLog("Erreur Réseau Spectateur: " + err.message);
-        });
+        .catch(err => debugLog("Erreur Réseau Spectateur: " + err.message));
+}
+
+// Fonction pour mettre à jour la barre UI
+function updateStatsDisplay(distanceKm, avgSpeedKmH, elevationMeters) {
+    const elDist = document.getElementById('statDistance');
+    const elSpeed = document.getElementById('statAvgSpeed');
+    const elEle = document.getElementById('statElevation');
+
+    if (elDist) elDist.innerText = distanceKm.toFixed(1);
+    if (elSpeed) elSpeed.innerText = avgSpeedKmH.toFixed(1);
+    if (elEle) elEle.innerText = Math.round(elevationMeters);
 }
 
 // --- RECUPERATION DES COMMENTAIRES ---
@@ -211,19 +215,16 @@ function fetchCommentsFromFirebase() {
         .then(res => res.json())
         .then(data => {
             if (!data) return;
-
             Object.keys(data).forEach(key => {
-                // Éviter de ré-afficher un commentaire déjà présent sur la carte
                 if (!displayedCommentIds.has(key)) {
                     displayedCommentIds.add(key);
                     addCommentToMap(data[key]);
                 }
             });
         })
-        .catch(err => console.log("Erreur chargement commentaires: ", err));
+        .catch(err => console.log("Erreur commentaires: ", err));
 }
 
-// --- AFFICHAGE SUR LA CARTE (AVEC PHOTO) ---
 function addCommentToMap(comment) {
     if (!comment || comment.lat === undefined || comment.lng === undefined) return;
 
@@ -248,9 +249,7 @@ function addCommentToMap(comment) {
         zIndexOffset: 1000 
     }).addTo(map);
 
-    // Contenu de la Pop-up
     let popupContent = `<div style="text-align:center; min-width: 120px;"><b>Message (${timeStr}) :</b><br>${comment.text || ''}`;
-    
     if (hasPhoto) {
         popupContent += `<br><a href="${comment.photo}" target="_blank">
           <img src="${comment.photo}" style="max-width:200px; max-height:200px; border-radius:8px; margin-top:8px; border: 1px solid #ccc; object-fit: cover;" />
@@ -262,7 +261,7 @@ function addCommentToMap(comment) {
 }
 
 // ==========================================
-// 5. GESTION DES PHOTOS ET COMMENTAIRES (CYCLISTE)
+// 5. PHOTOS & COMMENTAIRES (CYCLISTE)
 // ==========================================
 function handlePhotoSelection(e) {
     const file = e.target.files[0];
@@ -273,7 +272,7 @@ function handlePhotoSelection(e) {
         const img = new Image();
         img.onload = function() {
             const canvas = document.createElement('canvas');
-            const MAX_WIDTH = 600; // Recadrage max pour optimiser l'envoi
+            const MAX_WIDTH = 600;
             let width = img.width;
             let height = img.height;
 
@@ -287,11 +286,10 @@ function handlePhotoSelection(e) {
             const ctx = canvas.getContext('2d');
             ctx.drawImage(img, 0, 0, width, height);
 
-            // Compression JPEG (Qualité 0.6)
             currentPhotoBase64 = canvas.toDataURL('image/jpeg', 0.6);
 
             const btnPhoto = document.getElementById('btn-photo');
-            if (btnPhoto) btnPhoto.style.backgroundColor = '#10b981'; // Vert = photo prête
+            if (btnPhoto) btnPhoto.style.backgroundColor = '#10b981';
         };
         img.src = event.target.result;
     };
@@ -308,7 +306,7 @@ async function sendComment() {
     }
 
     if (!localPath || localPath.length === 0) {
-        alert("Position GPS non disponible. Attendez le premier signal GPS.");
+        alert("Position GPS non disponible.");
         return;
     }
 
@@ -332,58 +330,40 @@ async function sendComment() {
         if (response.ok) {
             if (input) input.value = '';
             currentPhotoBase64 = null;
-
             const btnPhoto = document.getElementById('btn-photo');
             if (btnPhoto) btnPhoto.style.backgroundColor = '#64748b';
-
             showToast("💬 Envoyé !");
-        } else {
-            alert("Erreur lors de l'envoi vers Firebase.");
         }
     } catch (err) {
-        console.error("Erreur envoi commentaire :", err);
         alert("Erreur d'envoi : " + err.message);
     }
 }
 
 // ==========================================
-// 6. CONTRÔLE GPS & ENVOI (CYCLISTE)
+// 6. CONTRÔLE GPS & ENVOI D'ALTITUDE (CYCLISTE)
 // ==========================================
 function startTracking() {
     if (!navigator.geolocation) {
-        alert("GPS non supporté par ce navigateur.");
+        alert("GPS non supporté.");
         return;
     }
 
     requestWakeLock();
     startAntiSleep();
     startSilentAudio();
-
     shareTrackingLink();
     
     localPath = [];
-    displayedCommentIds.clear(); // Réinitialise les commentaires affichés
+    displayedCommentIds.clear();
     if (polyline) polyline.setLatLngs([]);
-    if (marker) {
-        map.removeLayer(marker);
-        marker = null;
-    }
+    if (marker) { map.removeLayer(marker); marker = null; }
 
-    fetch(`${FIREBASE_DB_URL}/livetrack/sessions/${activeSessionId}.json`, {
-        method: 'DELETE'
-    });
+    fetch(`${FIREBASE_DB_URL}/livetrack/sessions/${activeSessionId}.json`, { method: 'DELETE' });
 
     const startBtn = document.getElementById('startBtn');
     const stopBtn = document.getElementById('stopBtn');
-    
-    if (startBtn) {
-        startBtn.disabled = true;
-        startBtn.style.opacity = '0.5';
-    }
-    if (stopBtn) {
-        stopBtn.disabled = false;
-        stopBtn.style.opacity = '1';
-    }
+    if (startBtn) { startBtn.disabled = true; startBtn.style.opacity = '0.5'; }
+    if (stopBtn) { stopBtn.disabled = false; stopBtn.style.opacity = '1'; }
 
     const pocketBtn = document.getElementById('pocketBtn');
     if (pocketBtn) pocketBtn.style.display = 'inline-block';
@@ -394,24 +374,15 @@ function startTracking() {
         (position) => {
             const lat = position.coords.latitude;
             const lng = position.coords.longitude;
+            const alt = position.coords.altitude || 0; // Altitude pour le dénivelé
             const accuracy = Math.round(position.coords.accuracy || 0);
 
-            // FILTRE CYCLISTE : On ignore les points très imprécis (> 50m)
-            if (accuracy > 50) {
-                console.warn("Point GPS ignoré (précision faible) :", accuracy, "m");
-                return;
-            }
+            if (accuracy > 50) return;
 
-            // FILTRE SAUT DE TÉLÉPORTATION
             if (localPath.length > 0) {
                 const lastPos = localPath[localPath.length - 1];
                 const prevLatLng = L.latLng(lastPos[0], lastPos[1]);
-                const currLatLng = L.latLng(lat, lng);
-
-                if (prevLatLng.distanceTo(currLatLng) > 500) {
-                    console.warn("Saut de puce GPS ignoré");
-                    return;
-                }
+                if (prevLatLng.distanceTo(L.latLng(lat, lng)) > 500) return;
             }
 
             localPath.push([lat, lng]);
@@ -425,7 +396,7 @@ function startTracking() {
                 map.panTo([lat, lng]);
             }
 
-            debugLog("CYCLISTE : " + localPath.length + " pts | " + lat.toFixed(4) + ", " + lng.toFixed(4));
+            debugLog("CYCLISTE : " + localPath.length + " pts | Alt: " + Math.round(alt) + "m");
 
             const now = Date.now();
             fetch(`${FIREBASE_DB_URL}/livetrack/sessions/${activeSessionId}/pts.json`, {
@@ -434,20 +405,15 @@ function startTracking() {
                 body: JSON.stringify({
                     lat: lat,
                     lng: lng,
+                    alt: alt,
                     accuracy: accuracy,
                     t: now,
                     timestamp: now
                 })
             }).catch(e => debugLog("Erreur Envoi: " + e.message));
         },
-        (error) => {
-            debugLog("Erreur GPS: " + error.message);
-        },
-        {
-            enableHighAccuracy: true,
-            maximumAge: 10000,
-            timeout: 50000
-        }
+        (error) => debugLog("Erreur GPS: " + error.message),
+        { enableHighAccuracy: true, maximumAge: 10000, timeout: 50000 }
     );
 }
 
@@ -455,21 +421,13 @@ function stopTracking() {
     if (watchId !== null) {
         navigator.geolocation.clearWatch(watchId);
         watchId = null;
-
         stopSilentAudio();
         stopAntiSleep();
 
         const startBtn = document.getElementById('startBtn');
         const stopBtn = document.getElementById('stopBtn');
-        
-        if (startBtn) {
-            startBtn.disabled = false;
-            startBtn.style.opacity = '1';
-        }
-        if (stopBtn) {
-            stopBtn.disabled = true;
-            stopBtn.style.opacity = '0.5';
-        }
+        if (startBtn) { startBtn.disabled = false; startBtn.style.opacity = '1'; }
+        if (stopBtn) { stopBtn.disabled = true; stopBtn.style.opacity = '0.5'; }
 
         const pocketBtn = document.getElementById('pocketBtn');
         const overlay = document.getElementById('blackOverlay');
@@ -482,21 +440,10 @@ function stopTracking() {
 
 function shareTrackingLink() {
     const shareUrl = window.location.origin + window.location.pathname + '?session=' + activeSessionId;
-
-    const shareData = {
-        title: 'Suivi vélo en direct 🚴‍♂️',
-        text: 'Suis ma position en direct !',
-        url: shareUrl
-    };
-
     if (navigator.share) {
-        navigator.share(shareData).catch(() => {});
+        navigator.share({ title: 'Suivi vélo en direct 🚴‍♂️', text: 'Suis ma position !', url: shareUrl }).catch(() => {});
     } else {
-        navigator.clipboard.writeText(shareUrl).then(() => {
-            showToast("Lien invité copié !");
-        }).catch(() => {
-            alert("Erreur lors de la copie du lien.");
-        });
+        navigator.clipboard.writeText(shareUrl).then(() => showToast("Lien invité copié !"));
     }
 }
 
@@ -512,16 +459,11 @@ function showToast(message) {
 function togglePocketMode() {
     const overlay = document.getElementById('blackOverlay');
     if (!overlay) return;
-
-    if (overlay.style.display === 'none' || overlay.style.display === '') {
-        overlay.style.display = 'flex';
-    } else {
-        overlay.style.display = 'none';
-    }
+    overlay.style.display = (overlay.style.display === 'none' || overlay.style.display === '') ? 'flex' : 'none';
 }
 
 // ==========================================
-// 7. DÉCLENCHEURS DES BOUTONS
+// 7. LISTENERS
 // ==========================================
 function setupEventListeners() {
     const startBtn = document.getElementById('startBtn');
@@ -529,7 +471,6 @@ function setupEventListeners() {
     const shareBtn = document.getElementById('shareBtn');
     const pocketBtn = document.getElementById('pocketBtn');
     const blackOverlay = document.getElementById('blackOverlay');
-
     const btnAddComment = document.getElementById('btn-add-comment');
     const btnPhoto = document.getElementById('btn-photo');
     const commentPhotoInput = document.getElementById('comment-photo');
@@ -537,11 +478,10 @@ function setupEventListeners() {
     if (startBtn) startBtn.addEventListener('click', startTracking);
     if (stopBtn) stopBtn.addEventListener('click', stopTracking);
     if (shareBtn) shareBtn.addEventListener('click', shareTrackingLink);
-    
     if (pocketBtn) pocketBtn.addEventListener('click', togglePocketMode);
     if (blackOverlay) blackOverlay.addEventListener('click', togglePocketMode);
-
     if (btnAddComment) btnAddComment.addEventListener('click', sendComment);
+
     if (btnPhoto && commentPhotoInput) {
         btnPhoto.addEventListener('click', () => commentPhotoInput.click());
         commentPhotoInput.addEventListener('change', handlePhotoSelection);
