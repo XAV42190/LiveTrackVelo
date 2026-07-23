@@ -59,12 +59,13 @@ window.addEventListener('DOMContentLoaded', () => {
     setupEventListeners();
 });
 
+// Affiche un petit badge de débogage ancré en haut à GAUCHE uniquement
 function debugLog(msg) {
     let debugBox = document.getElementById('debugBox');
     if (!debugBox) {
         debugBox = document.createElement('div');
         debugBox.id = 'debugBox';
-        debugBox.style.cssText = 'position:fixed;top:10px;left:10px;right:10px;background:rgba(0,0,0,0.85);color:#00ff00;font-family:monospace;font-size:12px;padding:8px;border-radius:5px;z-index:9999;word-break:break-all;max-height:80px;overflow-y:auto;';
+        debugBox.style.cssText = 'position:fixed; top:10px; left:10px; max-width:140px; background:rgba(0,0,0,0.8); color:#00ff00; font-family:monospace; font-size:10px; padding:4px 8px; border-radius:6px; z-index:9999; word-break:break-word; max-height:50px; overflow-y:auto; border:1px solid #333;';
         document.body.appendChild(debugBox);
     }
     debugBox.innerText = msg;
