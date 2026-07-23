@@ -1,5 +1,5 @@
 // Incrément de version pour forcer la purge du cache mobile
-const CACHE_NAME = 'livetrack-v979';
+const CACHE_NAME = 'livetrack-v980';
 
 self.addEventListener('install', (event) => {
     self.skipWaiting();
