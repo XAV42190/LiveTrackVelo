@@ -150,8 +150,38 @@ function fetchPointsFromFirebase() {
                 return;
             }
 
-            const rawPoints = Object.values(data);
-            const coords = rawPoints.map(p => [p.lat, p.lng]);
+            // 1. Conversion en tableau et filtrage basique
+            let rawPoints = Object.values(data).filter(p => p && p.lat !== undefined && p.lng !== undefined);
+
+            // 2. TRI CHRONOLOGIQUE STRICT par timestamp/t (Corrige les toiles d'araignées)
+            rawPoints.sort((a, b) => {
+                const timeA = a.timestamp || a.t || 0;
+                const timeB = b.timestamp || b.t || 0;
+                return timeA - timeB;
+            });
+
+            // 3. FILTRAGE DES ANOMALIES GPS (Précision et Sauts de téléportation)
+            let cleanedPoints = [];
+            let lastValidPoint = null;
+
+            rawPoints.forEach(p => {
+                // Ignore si précision trop médiocre (> 50m)
+                if (p.accuracy && p.accuracy > 50) return;
+
+                // Ignore si saut aberrant (> 500m)
+                if (lastValidPoint) {
+                    const prevLatLng = L.latLng(lastValidPoint.lat, lastValidPoint.lng);
+                    const currLatLng = L.latLng(p.lat, p.lng);
+                    if (prevLatLng.distanceTo(currLatLng) > 500) {
+                        return; 
+                    }
+                }
+
+                cleanedPoints.push(p);
+                lastValidPoint = p;
+            });
+
+            const coords = cleanedPoints.map(p => [p.lat, p.lng]);
 
             polyline.setLatLngs(coords);
 
@@ -364,6 +394,25 @@ function startTracking() {
         (position) => {
             const lat = position.coords.latitude;
             const lng = position.coords.longitude;
+            const accuracy = Math.round(position.coords.accuracy || 0);
+
+            // FILTRE CYCLISTE : On ignore les points très imprécis (> 50m)
+            if (accuracy > 50) {
+                console.warn("Point GPS ignoré (précision faible) :", accuracy, "m");
+                return;
+            }
+
+            // FILTRE SAUT DE TÉLÉPORTATION
+            if (localPath.length > 0) {
+                const lastPos = localPath[localPath.length - 1];
+                const prevLatLng = L.latLng(lastPos[0], lastPos[1]);
+                const currLatLng = L.latLng(lat, lng);
+
+                if (prevLatLng.distanceTo(currLatLng) > 500) {
+                    console.warn("Saut de puce GPS ignoré");
+                    return;
+                }
+            }
 
             localPath.push([lat, lng]);
             polyline.setLatLngs(localPath);
@@ -378,13 +427,16 @@ function startTracking() {
 
             debugLog("CYCLISTE : " + localPath.length + " pts | " + lat.toFixed(4) + ", " + lng.toFixed(4));
 
+            const now = Date.now();
             fetch(`${FIREBASE_DB_URL}/livetrack/sessions/${activeSessionId}/pts.json`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     lat: lat,
                     lng: lng,
-                    t: Date.now()
+                    accuracy: accuracy,
+                    t: now,
+                    timestamp: now
                 })
             }).catch(e => debugLog("Erreur Envoi: " + e.message));
         },
