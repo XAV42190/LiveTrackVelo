@@ -132,20 +132,62 @@
             font-size: 14px;
         }
 
-        /* --- NOUVEAU : MODAL IMAGE EN PLEIN ÉCRAN --- */
+        /* --- CARTE INFO-BULLE / MEDIA EN DIRECT --- */
+        .live-media-card {
+            display: none;
+            position: fixed;
+            bottom: 85px;
+            right: 15px;
+            max-width: 280px;
+            background: rgba(15, 23, 42, 0.95);
+            color: white;
+            padding: 12px;
+            border-radius: 12px;
+            z-index: 9000;
+            box-shadow: 0 8px 20px rgba(0,0,0,0.5);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            backdrop-filter: blur(6px);
+            animation: fadeIn 0.3s ease-in-out;
+        }
+
+        .live-media-card img {
+            width: 100%;
+            max-height: 160px;
+            object-fit: cover;
+            border-radius: 8px;
+            margin-top: 8px;
+            cursor: pointer;
+        }
+
+        .live-media-title {
+            font-size: 12px;
+            color: #38bdf8;
+            font-weight: bold;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .live-media-note {
+            font-size: 13px;
+            margin-top: 4px;
+            color: #f1f5f9;
+            word-wrap: break-word;
+        }
+
+        /* MODAL IMAGE EN PLEIN ÉCRAN */
         .image-modal {
-            display: none; /* Masqué par défaut */
+            display: none;
             position: fixed;
             top: 0;
             left: 0;
             width: 100vw;
             height: 100vh;
             background: rgba(0, 0, 0, 0.85);
-            z-index: 100000; /* Toujours au-dessus de tout */
+            z-index: 100000;
             justify-content: center;
             align-items: center;
             backdrop-filter: blur(5px);
-            cursor: pointer; /* Indique qu'on peut cliquer pour fermer */
+            cursor: pointer;
         }
 
         .image-modal img {
@@ -164,6 +206,11 @@
             font-size: 35px;
             font-weight: bold;
             cursor: pointer;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
         }
     </style>
 </head>
@@ -187,6 +234,13 @@
         <button id="pocketBtn">📱 Mode Poche</button>
     </div>
 
+    <!-- CARTE MEDIA/COMMENTAIRE EN DIRECT -->
+    <div id="liveMediaCard" class="live-media-card">
+        <div class="live-media-title">📸 En direct de la sortie</div>
+        <div id="liveMediaNote" class="live-media-note"></div>
+        <img id="liveMediaImg" src="" alt="Photo envoyée" style="display:none;" onclick="openImageModal(this.src)">
+    </div>
+
     <!-- MASQUE NOIR POUR MODE POCHE -->
     <div id="blackOverlay">
         🔒 ÉCRAN VERROUILLÉ<br><br>
@@ -196,7 +250,7 @@
     <!-- NOTIFICATION TOAST -->
     <div id="toast">Lien invité copié !</div>
 
-    <!-- --- NOUVEAU : STRUCTURE MODAL POUR IMAGE --- -->
+    <!-- STRUCTURE MODAL POUR IMAGE PLEIN ÉCRAN -->
     <div id="imageModal" class="image-modal" onclick="closeImageModal()">
         <span class="image-modal-close">&times;</span>
         <img id="fullSizeImage" src="" alt="Photo du trajet">
@@ -213,10 +267,55 @@
 
     <!-- Leaflet JS -->
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-    
+
+    <!-- FIREBASE SDKs (Compat v9) -->
+    <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-database-compat.js"></script>
+
     <!-- Application JS -->
     <script src="app.js"></script>
     <script>
+      // Fonctions utilitaires pour la modal d'image
+      function openImageModal(src) {
+        if (!src) return;
+        document.getElementById('fullSizeImage').src = src;
+        document.getElementById('imageModal').style.display = 'flex';
+      }
+
+      function closeImageModal() {
+        document.getElementById('imageModal').style.display = 'none';
+      }
+
+      // Écoute des données Firebase en direct (Photo / Commentaire)
+      window.addEventListener('DOMContentLoaded', () => {
+        const urlParams = new URLSearchParams(window.location.search);
+        const sessionId = urlParams.get('session');
+
+        if (sessionId && typeof firebase !== 'undefined') {
+          const dbRef = firebase.database().ref("livetrack/sessions/" + sessionId + "/info");
+          
+          dbRef.on("value", (snapshot) => {
+            const data = snapshot.val();
+            const card = document.getElementById('liveMediaCard');
+            const noteElem = document.getElementById('liveMediaNote');
+            const imgElem = document.getElementById('liveMediaImg');
+
+            if (data && (data.note || data.photoBase64)) {
+              noteElem.innerText = data.note || "";
+              
+              if (data.photoBase64) {
+                imgElem.src = "data:image/jpeg;base64," + data.photoBase64;
+                imgElem.style.display = "block";
+              } else {
+                imgElem.style.display = "none";
+              }
+
+              card.style.display = "block";
+            }
+          });
+        }
+      });
+
       if ('serviceWorker' in navigator) {
         navigator.serviceWorker.register('sw.js');
       }
