@@ -13,7 +13,7 @@
       margin: 0;
       padding: 0;
       height: 100%;
-      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
     }
     #map {
       height: 100vh;
@@ -25,46 +25,44 @@
       left: 50%;
       transform: translateX(-50%);
       z-index: 1000;
-      background: rgba(255, 255, 255, 0.95);
+      background: rgba(30, 30, 30, 0.90);
+      color: #fff;
       padding: 10px 20px;
-      border-radius: 25px;
-      box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+      border-radius: 20px;
+      box-shadow: 0 4px 15px rgba(0,0,0,0.4);
       display: flex;
       gap: 20px;
       text-align: center;
+      border: 1px solid #333;
     }
     .stat-item {
       display: flex;
       flex-direction: column;
     }
     .stat-title {
-      font-size: 11px;
-      color: #666;
+      font-size: 10px;
+      color: #aaa;
       text-transform: uppercase;
       font-weight: bold;
     }
     .stat-value {
       font-size: 16px;
       font-weight: bold;
-      color: #2c3e50;
+      color: #2ed573;
     }
     .stat-value.elevation {
-      color: #d35400;
+      color: #ffa502;
     }
 
-    /* POPUP PHOTO STYLES */
     .popup-photo {
-      width: 100%;
+      max-width: 200px;
+      max-height: 200px;
       border-radius: 8px;
-      margin-bottom: 5px;
+      margin-top: 5px;
       cursor: pointer;
-      transition: transform 0.2s ease;
-    }
-    .popup-photo:hover {
-      transform: scale(1.03);
+      display: block;
     }
 
-    /* LIGHTBOX / ZOOM PLEIN ÉCRAN */
     #lightbox {
       display: none;
       position: fixed;
@@ -73,7 +71,7 @@
       left: 0;
       width: 100%;
       height: 100%;
-      background-color: rgba(0, 0, 0, 0.85);
+      background-color: rgba(0, 0, 0, 0.9);
       justify-content: center;
       align-items: center;
       cursor: pointer;
@@ -82,7 +80,6 @@
       max-width: 90%;
       max-height: 90%;
       border-radius: 8px;
-      box-shadow: 0 0 20px rgba(255, 255, 255, 0.2);
     }
   </style>
 </head>
@@ -91,15 +88,19 @@
   <!-- Panneau des statistiques -->
   <div class="stats-panel">
     <div class="stat-item">
+      <span class="stat-title">Vitesse</span>
+      <span id="speedVal" class="stat-value">0.0 km/h</span>
+    </div>
+    <div class="stat-item">
+      <span class="stat-title">V.Moyenne</span>
+      <span id="avgSpeedVal" class="stat-value">0.0 km/h</span>
+    </div>
+    <div class="stat-item">
       <span class="stat-title">Distance</span>
       <span id="distVal" class="stat-value">0.0 km</span>
     </div>
     <div class="stat-item">
-      <span class="stat-title">Vit. Moyenne</span>
-      <span id="speedVal" class="stat-value">0.0 km/h</span>
-    </div>
-    <div class="stat-item">
-      <span class="stat-title">D+ Cumulé</span>
+      <span class="stat-title">D+ Total</span>
       <span id="eleVal" class="stat-value elevation">0 m</span>
     </div>
   </div>
@@ -113,63 +114,47 @@
 
   <!-- Leaflet JS -->
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-  <!-- Firebase App & Database -->
-  <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
+  <!-- Firebase App & Database (SDK Compat v9/v8) -->
+  <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-database-compat.js"></script>
 
   <script>
-    // 1. Config Firebase
+    // 1. Configuration Firebase
     const firebaseConfig = {
       databaseURL: "https://suivisortievelo-default-rtdb.europe-west1.firebasedatabase.app"
     };
     firebase.initializeApp(firebaseConfig);
     const database = firebase.database();
 
-    // 2. Récupération de la session dans l'URL (?session=XXXXX)
+    // 2. Extraction du Session ID depuis l'URL
     const urlParams = new URLSearchParams(window.location.search);
     const sessionId = urlParams.get('session');
 
-    // 3. Initialisation de la carte Leaflet
-    const map = L.map('map').setView([46.603354, 1.888334], 13);
+    // 3. Carte Leaflet
+    const map = L.map('map').setView([48.8566, 2.3522], 13);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       attribution: '© OpenStreetMap'
     }).addTo(map);
 
-    let polyline = L.polyline([], {color: '#007bff', weight: 5}).addTo(map);
+    let polyline = L.polyline([], {color: '#00a8ff', weight: 5, opacity: 0.8}).addTo(map);
     let bikeMarker = null;
+    let displayedMessageKeys = new Set();
 
-    // Variables de calcul des stats
-    let totalDistanceKm = 0;
-    let totalElevationGainM = 0;
-    let lastAlt = null;
-    let startTime = null;
-    let pointsList = [];
-
-    // Icône personnalisée Vélo
     const bikeIcon = L.icon({
       iconUrl: 'https://cdn-icons-png.flaticon.com/512/2972/2972185.png',
       iconSize: [35, 35],
       iconAnchor: [17, 17]
     });
 
-    // Formule Haversine pour la distance
-    function calculateDistance(lat1, lon1, lat2, lon2) {
-      const R = 6371; // Rayon de la Terre en km
-      const dLat = (lat2 - lat1) * Math.PI / 180;
-      const dLon = (lon2 - lon1) * Math.PI / 180;
-      const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
-                Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * 
-                Math.sin(dLon/2) * Math.sin(dLon/2);
-      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-      return R * c;
-    }
+    const photoIcon = L.icon({
+      iconUrl: 'https://cdn-icons-png.flaticon.com/512/684/684908.png',
+      iconSize: [30, 30],
+      iconAnchor: [15, 15]
+    });
 
-    // Fonctions de gestion de la Lightbox (Zoom photo)
     function openLightbox(src) {
-      const lightbox = document.getElementById('lightbox');
-      const img = document.getElementById('lightboxImg');
-      img.src = src;
-      lightbox.style.display = 'flex';
+      document.getElementById('lightboxImg').src = src;
+      document.getElementById('lightbox').style.display = 'flex';
     }
 
     function closeLightbox() {
@@ -177,86 +162,61 @@
     }
 
     if (sessionId) {
-      // --- ÉCOUTE DES POINTS GPS DE LA SESSION ---
-      database.ref(`livetrack/sessions/${sessionId}/pts`).on('child_added', (snapshot) => {
-        const pt = snapshot.val();
-        if (!pt || pt.lat === undefined || pt.lng === undefined) return;
 
-        const currentLatLng = [pt.lat, pt.lng];
-        const currentAlt = pt.alt !== undefined ? parseFloat(pt.alt) : null;
-        const currentTimestamp = pt.timestamp;
+      // --- A. ÉCOUTE DE LA POSITION LIVE & DE TOUTES LES STATS ---
+      database.ref(`sessions/${sessionId}/live`).on('value', (snapshot) => {
+        const data = snapshot.val();
+        if (!data) return;
 
-        // Premier point : init heure de début
-        if (!startTime && currentTimestamp) {
-          startTime = currentTimestamp;
-        }
+        const currentLatLng = [data.latitude, data.longitude];
 
-        // Calcul du D+ Cumulé
-        if (currentAlt !== null && !isNaN(currentAlt)) {
-          if (lastAlt !== null) {
-            const altDiff = currentAlt - lastAlt;
-            if (altDiff > 0.8) {
-              totalElevationGainM += altDiff;
-            }
-          }
-          lastAlt = currentAlt;
-        }
+        // Mise à jour de l'UI
+        document.getElementById('speedVal').innerText = (data.speed || 0).toFixed(1) + ' km/h';
+        document.getElementById('avgSpeedVal').innerText = (data.avg_speed || 0).toFixed(1) + ' km/h';
+        document.getElementById('distVal').innerText = (data.distance || 0).toFixed(2) + ' km';
+        document.getElementById('eleVal').innerText = Math.round(data.d_plus || 0) + ' m';
 
-        // Calcul de la Distance
-        if (pointsList.length > 0) {
-          const lastPt = pointsList[pointsList.length - 1];
-          const distIncrement = calculateDistance(lastPt[0], lastPt[1], pt.lat, pt.lng);
-          totalDistanceKm += distIncrement;
-        }
-
-        pointsList.push(currentLatLng);
-        polyline.setLatLngs(pointsList);
-
-        // Positionnement / Déplacement du marqueur du vélo
+        // Positionnement du vélo
         if (!bikeMarker) {
           bikeMarker = L.marker(currentLatLng, {icon: bikeIcon}).addTo(map);
           map.setView(currentLatLng, 15);
         } else {
           bikeMarker.setLatLng(currentLatLng);
+          map.panTo(currentLatLng);
         }
-
-        // Calcul Vitesse Moyenne
-        let avgSpeed = 0;
-        if (startTime && currentTimestamp && currentTimestamp > startTime) {
-          const hours = (currentTimestamp - startTime) / (1000 * 3600);
-          if (hours > 0) avgSpeed = totalDistanceKm / hours;
-        }
-
-        // Mise à jour de l'affichage UI
-        document.getElementById('distVal').innerText = totalDistanceKm.toFixed(1) + ' km';
-        document.getElementById('speedVal').innerText = avgSpeed.toFixed(1) + ' km/h';
-        document.getElementById('eleVal').innerText = Math.round(totalElevationGainM) + ' m';
       });
 
-      // --- ÉCOUTE DES COMMENTAIRES ET PHOTOS (Noeud info) ---
-      database.ref(`livetrack/sessions/${sessionId}/info`).on('value', (snapshot) => {
-        const info = snapshot.val();
-        if (!info || !info.lat || !info.lng) return;
+      // --- B. ÉCOUTE DU TRACÉ COMPLET (Route) ---
+      database.ref(`sessions/${sessionId}/route`).on('value', (snapshot) => {
+        const data = snapshot.val();
+        if (!data) return;
 
-        let popupContent = `<div style="max-width:200px; text-align:center;">`;
-        if (info.photoBase64) {
-          const imgSrc = `data:image/jpeg;base64,${info.photoBase64}`;
-          popupContent += `<img src="${imgSrc}" class="popup-photo" onclick="openLightbox('${imgSrc}')" title="Cliquer pour agrandir"/>`;
-          popupContent += `<small style="color: #007bff; display: block; margin-bottom: 5px;">🔍 Cliquer pour agrandir</small>`;
-        }
-        if (info.note) {
-          popupContent += `<p style="margin:0; font-weight:bold; color:#333;">${info.note}</p>`;
+        const routePoints = Object.values(data).map(pt => [pt.lat, pt.lng]);
+        polyline.setLatLngs(routePoints);
+      });
+
+      // --- C. ÉCOUTE DES COMMENTAIRES ET PHOTOS EN DIRECT ---
+      database.ref(`sessions/${sessionId}/messages`).on('child_added', (snapshot) => {
+        const key = snapshot.key;
+        if (displayedMessageKeys.has(key)) return;
+        displayedMessageKeys.add(key);
+
+        const msg = snapshot.val();
+        if (!msg || !msg.latitude || !msg.longitude) return;
+
+        let popupContent = `<div style="text-align:center;">`;
+        if (msg.text) {
+          popupContent += `<p style="margin:5px 0; font-weight:bold;">${msg.text}</p>`;
         }
         popupContent += `</div>`;
 
-        L.marker([info.lat, info.lng])
+        L.marker([msg.latitude, msg.longitude], {icon: photoIcon})
           .addTo(map)
-          .bindPopup(popupContent)
-          .openPopup();
+          .bindPopup(popupContent);
       });
 
     } else {
-      alert("Aucune session spécifiée dans l'URL. Veuillez ouvrir le lien fourni par l'application.");
+      alert("Aucune session trouvée dans l'URL. Veuillez utiliser le lien généré par l'application mobile.");
     }
   </script>
 </body>
