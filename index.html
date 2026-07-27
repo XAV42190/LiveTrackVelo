@@ -3,32 +3,63 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>LiveTrack Vélo - Suivi en direct</title>
+  <title>LiveTrack Vélo - Spectateur</title>
+
+  <!-- Leaflet (Cartographie) -->
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+  <!-- Firebase JavaScript SDK v8 -->
   <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
   <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
+
   <style>
-    body { margin: 0; padding: 0; font-family: Arial, sans-serif; }
-    #map { height: 100vh; width: 100vw; }
+    * { box-sizing: border-box; }
+    body, html { margin: 0; padding: 0; height: 100%; width: 100%; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    #map { height: 100vh; width: 100vw; z-index: 1; }
+
+    /* Panneau de statistiques */
     #stats {
-      position: absolute; top: 10px; right: 10px; z-index: 1000;
-      background: rgba(255,255,255,0.9); padding: 10px 15px;
-      border-radius: 8px; box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+      position: absolute; top: 12px; right: 12px; z-index: 1000;
+      background: rgba(255, 255, 255, 0.95); padding: 12px 16px;
+      border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+      font-size: 14px; color: #1e293b; border: 1px solid rgba(0,0,0,0.05);
     }
+    #stats div { margin-bottom: 4px; }
+    #stats div:last-child { margin-bottom: 0; }
+    #stats span { font-weight: bold; color: #2563eb; }
+
+    /* Modal Image Grand Format */
+    #imageModal {
+      display: none; position: fixed; z-index: 9999;
+      top: 0; left: 0; width: 100%; height: 100%;
+      background-color: rgba(0,0,0,0.85);
+      justify-content: center; align-items: center;
+    }
+    #imageModal img { max-width: 90%; max-height: 90%; border-radius: 8px; }
   </style>
 </head>
 <body>
 
+  <!-- Overlay des Statistiques -->
   <div id="stats">
-    <div><b>Vitesse :</b> <span id="speed">0.0</span> km/h</div>
-    <div><b>Distance :</b> <span id="distance">0.00</span> km</div>
-    <div><b>D+ Total :</b> <span id="elevation">0</span> m</div>
+    <div>🚴🏼‍♂️ <b>Vitesse :</b> <span id="statAvgSpeed">0.0</span> km/h</div>
+    <div>📏 <b>Distance :</b> <span id="statDistance">0.00</span> km</div>
+    <div>⛰️ <b>D+ Total :</b> <span id="statElevation">0</span> m</div>
   </div>
+
+  <!-- Conteneur Carte -->
   <div id="map"></div>
 
+  <!-- Modal d'Agrandissement Photo -->
+  <div id="imageModal" onclick="closeImageModal()">
+    <img id="fullSizeImage" src="" alt="Photo agrandie" />
+  </div>
+
   <script>
-    // ⚠️ METS TES PROPRES CLÉS FIREBASE ICI (trouvables dans ta console Firebase)
+    // ==========================================
+    // 1. CONFIGURATION FIREBASE CORRIGÉE
+    // ==========================================
     const firebaseConfig = {
       apiKey: "AIzaSyBE-6F7c2rF-f5DQDv3D9Wiu9l1eiNbY0s",
       authDomain: "suivisortievelo.firebaseapp.com",
@@ -37,62 +68,126 @@
       storageBucket: "suivisortievelo.firebasestorage.app",
       messagingSenderId: "286724342837",
       appId: "1:286724342837:web:89c3838de2393123f31d7c",
-      appId: "TON_APP_ID"
       measurementId: "G-PQ9MQX0DQ5"
     };
+
     firebase.initializeApp(firebaseConfig);
     const db = firebase.database();
 
-    // Récupération ID session dans l'URL (?session=XXXXX)
+    // Récupération de la session dans l'URL (?session=XXXX)
     const urlParams = new URLSearchParams(window.location.search);
     const sessionId = urlParams.get('session');
 
-    // Carte Leaflet
-    const map = L.map('map').setView([48.8566, 2.3522], 13);
-    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+    // ==========================================
+    // 2. INITIALISATION CARTE
+    // ==========================================
+    const map = L.map('map').setView([46.603354, 1.888334], 6);
+    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+      attribution: '© OpenStreetMap'
+    }).addTo(map);
 
-    let routePolyline = L.polyline([], {color: 'blue', weight: 5}).addTo(map);
+    let polyline = L.polyline([], { color: '#2563eb', weight: 5, opacity: 0.9 }).addTo(map);
     let bikeMarker = null;
 
-    if (sessionId) {
-      // 1. Écoute du tracé GPS
-      db.ref("sessions/" + sessionId + "/points").on("child_added", (snapshot) => {
-        const data = snapshot.val();
-        const latLng = [data.lat, data.lng];
-        
-        routePolyline.addLatLng(latLng);
+    if (!sessionId) {
+      alert("⚠️ Aucune session de suivi spécifiée dans le lien !");
+    } else {
+      console.log("Connecté à la session : " + sessionId);
 
-        if (!bikeMarker) {
-          bikeMarker = L.marker(latLng).addTo(map);
-        } else {
-          bikeMarker.setLatLng(latLng);
+      // ==========================================
+      // 3. ECOUTE DU TRACÉ & STATS GPS
+      // ==========================================
+      const ptsRef = db.ref("livetrack/sessions/" + sessionId + "/pts");
+      ptsRef.on("child_added", (snapshot) => {
+        const data = snapshot.val();
+        if (data && data.lat && data.lng) {
+          const latLng = [data.lat, data.lng];
+          polyline.addLatLng(latLng);
+
+          if (!bikeMarker) {
+            // Création de l'icône Vélo
+            const bikeIcon = L.divIcon({
+              className: 'custom-bike-icon',
+              html: '<div style="font-size: 26px;">🚴🏼‍♂️</div>',
+              iconSize: [30, 30],
+              iconAnchor: [15, 15]
+            });
+            bikeMarker = L.marker(latLng, { icon: bikeIcon }).addTo(map);
+            map.setView(latLng, 15);
+          } else {
+            bikeMarker.setLatLng(latLng);
+            map.panTo(latLng);
+          }
         }
-        map.panTo(latLng);
       });
 
-      // 2. Écoute des Stats globales
-      db.ref("sessions/" + sessionId + "/info").on("value", (snapshot) => {
+      // Écoute des infos globales (Stats de parcours)
+      const infoRef = db.ref("livetrack/sessions/" + sessionId + "/info");
+      infoRef.on("value", (snapshot) => {
         const data = snapshot.val();
         if (data) {
-          document.getElementById("speed").innerText = (data.currentSpeed || 0).toFixed(1);
-          document.getElementById("distance").innerText = ((data.totalDistance || 0) / 1000).toFixed(2);
-          document.getElementById("elevation").innerText = (data.elevationGain || 0).toFixed(0);
+          if (data.currentSpeed !== undefined) document.getElementById("statAvgSpeed").innerText = data.currentSpeed.toFixed(1);
+          if (data.totalDistance !== undefined) document.getElementById("statDistance").innerText = (data.totalDistance / 1000).toFixed(2);
+          if (data.elevationGain !== undefined) document.getElementById("statElevation").innerText = Math.round(data.elevationGain);
         }
       });
 
-      // 3. Écoute des Photos et Commentaires
-      db.ref("sessions/" + sessionId + "/messages").on("child_added", (snapshot) => {
-        const data = snapshot.val();
-        let content = "";
-        if (data.image) content += `<img src="data:image/jpeg;base64,${data.image}" style="max-width:200px; display:block; margin-bottom:5px;"/>`;
-        if (data.text) content += `<div>${data.text}</div>`;
-
-        if (content) {
-          L.marker([data.lat, data.lng]).addTo(map).bindPopup(content);
+      // ==========================================
+      // 4. ÉCOUTE PHOTOS & COMMENTAIRES
+      // ==========================================
+      const commentsRef = db.ref("livetrack/sessions/" + sessionId + "/comments");
+      commentsRef.on("child_added", (snapshot) => {
+        const comment = snapshot.val();
+        if (comment && comment.lat && comment.lng) {
+          addCommentMarker(comment);
         }
       });
-    } else {
-      alert("Aucune session spécifiée dans l'URL !");
+
+      const messagesRef = db.ref("livetrack/sessions/" + sessionId + "/messages");
+      messagesRef.on("child_added", (snapshot) => {
+        const msg = snapshot.val();
+        if (msg && msg.lat && msg.lng) {
+          addCommentMarker(msg);
+        }
+      });
+    }
+
+    function addCommentMarker(item) {
+      const hasPhoto = Boolean(item.image || item.photo);
+      const text = item.text || item.note || '';
+      const badge = hasPhoto ? '📸 ' : '💬 ';
+
+      const customIcon = L.divIcon({
+        className: 'custom-msg-icon',
+        html: `<div style="background-color: #ef4444; color: white; padding: 4px 8px; border-radius: 12px; font-weight: bold; font-size: 11px; border: 2px solid white; box-shadow: 0 2px 6px rgba(0,0,0,0.3); white-space: nowrap;">
+                ${badge}${text ? text.substring(0, 15) + '...' : 'Photo'}
+               </div>`,
+        iconSize: [100, 26],
+        iconAnchor: [50, 13]
+      });
+
+      const marker = L.marker([item.lat, item.lng], { icon: customIcon }).addTo(map);
+
+      let popupContent = `<div style="text-align:center; min-width: 120px;">`;
+      if (text) popupContent += `<b>${text}</b><br>`;
+      
+      const photoSrc = item.image ? (item.image.startsWith('data:') ? item.image : 'data:image/jpeg;base64,' + item.image) : item.photo;
+      if (photoSrc) {
+        popupContent += `<img src="${photoSrc}" onclick="openImageModal('${photoSrc}')" style="max-width:180px; max-height:180px; border-radius:6px; margin-top:6px; cursor:pointer;" />`;
+      }
+      popupContent += `</div>`;
+
+      marker.bindPopup(popupContent);
+    }
+
+    function openImageModal(src) {
+      document.getElementById('fullSizeImage').src = src;
+      document.getElementById('imageModal').style.display = 'flex';
+    }
+
+    function closeImageModal() {
+      document.getElementById('imageModal').style.display = 'none';
     }
   </script>
 </body>
