@@ -54,13 +54,28 @@
       color: #ffa502;
     }
 
+    /* POPUP PHOTO STYLES */
     .popup-photo {
-      max-width: 200px;
-      max-height: 200px;
-      border-radius: 8px;
-      margin-top: 5px;
+      width: 100%;             /* S'adapte automatiquement à la largeur du popup */
+      max-width: 220px;        /* Ne dépasse pas 220px */
+      height: auto;            /* Conserve les proportions sans déformer */
+      max-height: 180px;       /* Évite les images trop hautes */
+      object-fit: cover;       /* Recadre proprement si nécessaire */
+      border-radius: 8px;      /* Coins arrondis */
+      margin: 8px 0;
       cursor: pointer;
-      display: block;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.15); /* Petite ombre élégante */
+      transition: transform 0.2s ease;
+    }
+
+    .popup-photo:hover {
+      transform: scale(1.02);
+    }
+
+    /* Force Leaflet à ajuster la boîte à l'image */
+    .leaflet-popup-content {
+      margin: 12px 14px;
+      line-height: 1.4;
     }
 
     #lightbox {
