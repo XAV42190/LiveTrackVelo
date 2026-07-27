@@ -204,9 +204,19 @@
         const msg = snapshot.val();
         if (!msg || !msg.latitude || !msg.longitude) return;
 
-        let popupContent = `<div style="text-align:center;">`;
+        let popupContent = `<div style="text-align:center; max-width:220px;">`;
+        
+        // Affichage de la photo si transmise en Base64
+        if (msg.imageBase64) {
+          const imgSrc = `data:image/jpeg;base64,${msg.imageBase64}`;
+          popupContent += `
+            <img src="${imgSrc}" class="popup-photo" onclick="openLightbox('${imgSrc}')" title="Cliquer pour agrandir"/>
+            <small style="color: #007bff; display: block; margin-bottom: 5px; cursor: pointer;" onclick="openLightbox('${imgSrc}')">🔍 Agrandir</small>
+          `;
+        }
+
         if (msg.text) {
-          popupContent += `<p style="margin:5px 0; font-weight:bold;">${msg.text}</p>`;
+          popupContent += `<p style="margin:5px 0; font-weight:bold; color:#333;">${msg.text}</p>`;
         }
         popupContent += `</div>`;
 
