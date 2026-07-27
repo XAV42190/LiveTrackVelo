@@ -7,10 +7,12 @@ let map, marker, polyline;
 let watchId = null;
 let viewerInterval = null;
 let commentsInterval = null;
+let infoInterval = null;
 let localPath = [];
 let wakeLock = null;
 let displayedCommentIds = new Set();
 let currentPhotoBase64 = null;
+let infoMarker = null;
 
 // Détection de la session et du rôle (Spectateur vs Cycliste)
 const urlParams = new URLSearchParams(window.location.search);
@@ -53,13 +55,17 @@ window.addEventListener('DOMContentLoaded', () => {
         debugLog("CYCLISTE : Prêt (Session " + activeSessionId + ")");
     }
 
+    // Écoute des commentaires Web + Info Application Mobile
     fetchCommentsFromFirebase();
     commentsInterval = setInterval(fetchCommentsFromFirebase, 4000);
+
+    fetchSessionInfoFromFirebase();
+    infoInterval = setInterval(fetchSessionInfoFromFirebase, 4000);
 
     setupEventListeners();
 });
 
-// Affiche un petit badge de débogage ancré en haut à GAUCHE uniquement
+// Affiche un petit badge de débogage ancré en haut à DROITE
 function debugLog(msg) {
     let debugBox = document.getElementById('debugBox');
     if (!debugBox) {
@@ -198,7 +204,7 @@ function updateStatsDisplay(distanceKm, avgSpeedKmH, elevationMeters) {
     if (elEle) elEle.innerText = Math.round(elevationMeters);
 }
 
-// --- RECUPERATION DES COMMENTAIRES ---
+// --- RECUPERATION DES COMMENTAIRES WEB ---
 function fetchCommentsFromFirebase() {
     const url = `${FIREBASE_DB_URL}/livetrack/sessions/${activeSessionId}/comments.json`;
 
@@ -214,6 +220,75 @@ function fetchCommentsFromFirebase() {
             });
         })
         .catch(err => console.log("Erreur commentaires: ", err));
+}
+
+// --- NOUVEAU : RECUPERATION DU NŒUD INFO (Envoyé par l'app Mobile Android Flutter) ---
+function fetchSessionInfoFromFirebase() {
+    const url = `${FIREBASE_DB_URL}/livetrack/sessions/${activeSessionId}/info.json`;
+
+    fetch(url)
+        .then(res => res.json())
+        .then(data => {
+            if (!data) return;
+
+            const text = data.note || '';
+            const photoRaw = data.photoBase64 || null;
+            const photo = photoRaw ? (photoRaw.startsWith('data:') ? photoRaw : 'data:image/jpeg;base64,' + photoRaw) : null;
+            
+            // On utilise les coordonnées envoyées, ou la dernière position du parcours
+            let lat = data.lat;
+            let lng = data.lng;
+
+            if ((lat === undefined || lng === undefined) && polyline) {
+                const latLngs = polyline.getLatLngs();
+                if (latLngs.length > 0) {
+                    const lastPt = latLngs[latLngs.length - 1];
+                    lat = lastPt.lat;
+                    lng = lastPt.lng;
+                }
+            }
+
+            if (lat !== undefined && lng !== undefined) {
+                addInfoMarkerToMap(lat, lng, text, photo, data.timestamp);
+            }
+        })
+        .catch(err => console.log("Erreur info session: ", err));
+}
+
+function addInfoMarkerToMap(lat, lng, text, photoUrl, timestamp) {
+    if (infoMarker) {
+        map.removeLayer(infoMarker);
+    }
+
+    const timeStr = timestamp 
+        ? new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        : '';
+
+    const badge = photoUrl ? '📸 ' : '💬 ';
+
+    const customIcon = L.divIcon({
+        className: 'custom-info-icon',
+        html: `<div style="background-color: #FF5722; color: white; padding: 4px 8px; border-radius: 12px; font-weight: bold; font-size: 12px; border: 2px solid white; box-shadow: 0 2px 5px rgba(0,0,0,0.3); white-space: nowrap;">
+                ${badge}${text || 'Info Mobile'}
+               </div>`,
+        iconSize: [120, 30],
+        iconAnchor: [60, 15]
+    });
+
+    infoMarker = L.marker([lat, lng], { 
+        icon: customIcon,
+        zIndexOffset: 2000 
+    }).addTo(map);
+
+    let popupContent = `<div style="text-align:center; min-width: 120px;"><b>Message App (${timeStr}) :</b><br>${text || ''}`;
+    if (photoUrl) {
+        popupContent += `<br>
+          <img src="${photoUrl}" onclick="openImageModal(this.src)" style="max-width:200px; max-height:200px; border-radius:8px; margin-top:8px; border: 1px solid #ccc; object-fit: cover; cursor: pointer;" title="Cliquez pour agrandir" />
+        `;
+    }
+    popupContent += `</div>`;
+
+    infoMarker.bindPopup(popupContent);
 }
 
 function addCommentToMap(comment) {
@@ -242,7 +317,6 @@ function addCommentToMap(comment) {
 
     let popupContent = `<div style="text-align:center; min-width: 120px;"><b>Message (${timeStr}) :</b><br>${comment.text || ''}`;
     if (hasPhoto) {
-        // --- NOUVEAU : On appelle la fonction openImageModal() au clic sur la photo ---
         popupContent += `<br>
           <img src="${comment.photo}" onclick="openImageModal(this.src)" style="max-width:200px; max-height:200px; border-radius:8px; margin-top:8px; border: 1px solid #ccc; object-fit: cover; cursor: pointer;" title="Cliquez pour agrandir" />
         `;
@@ -253,7 +327,7 @@ function addCommentToMap(comment) {
 }
 
 // ==========================================
-// 5. PHOTOS & COMMENTAIRES (CYCLISTE)
+// 5. PHOTOS & COMMENTAIRES (CYCLISTE WEB)
 // ==========================================
 function handlePhotoSelection(e) {
     const file = e.target.files[0];
@@ -349,6 +423,7 @@ function startTracking() {
     displayedCommentIds.clear();
     if (polyline) polyline.setLatLngs([]);
     if (marker) { map.removeLayer(marker); marker = null; }
+    if (infoMarker) { map.removeLayer(infoMarker); infoMarker = null; }
 
     fetch(`${FIREBASE_DB_URL}/livetrack/sessions/${activeSessionId}.json`, { method: 'DELETE' });
 
@@ -462,7 +537,7 @@ function openImageModal(imgSrc) {
     const modalImg = document.getElementById('fullSizeImage');
     if (modal && modalImg) {
         modalImg.src = imgSrc;
-        modal.style.display = "flex"; // Affiche en Flexbox pour centrer
+        modal.style.display = "flex";
     }
 }
 
