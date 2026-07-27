@@ -3,245 +3,94 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>LiveTrack Vélo - Suivi Spectateur</title>
-  
-  <!-- Leaflet CSS -->
+  <title>LiveTrack Vélo - Suivi en direct</title>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-  
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
   <style>
-    body, html {
-      margin: 0;
-      padding: 0;
-      height: 100%;
-      font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-    }
-    #map {
-      height: 100vh;
-      width: 100%;
-    }
-    .stats-panel {
-      position: absolute;
-      top: 15px;
-      left: 50%;
-      transform: translateX(-50%);
-      z-index: 1000;
-      background: rgba(30, 30, 30, 0.90);
-      color: #fff;
-      padding: 10px 20px;
-      border-radius: 20px;
-      box-shadow: 0 4px 15px rgba(0,0,0,0.4);
-      display: flex;
-      gap: 20px;
-      text-align: center;
-      border: 1px solid #333;
-    }
-    .stat-item {
-      display: flex;
-      flex-direction: column;
-    }
-    .stat-title {
-      font-size: 10px;
-      color: #aaa;
-      text-transform: uppercase;
-      font-weight: bold;
-    }
-    .stat-value {
-      font-size: 16px;
-      font-weight: bold;
-      color: #2ed573;
-    }
-    .stat-value.elevation {
-      color: #ffa502;
-    }
-
-    /* POPUP PHOTO STYLES */
-    .popup-photo {
-      width: 100%;             /* S'adapte automatiquement à la largeur du popup */
-      max-width: 220px;        /* Ne dépasse pas 220px */
-      height: auto;            /* Conserve les proportions sans déformer */
-      max-height: 180px;       /* Évite les images trop hautes */
-      object-fit: cover;       /* Recadre proprement si nécessaire */
-      border-radius: 8px;      /* Coins arrondis */
-      margin: 8px 0;
-      cursor: pointer;
-      box-shadow: 0 2px 8px rgba(0,0,0,0.15); /* Petite ombre élégante */
-      transition: transform 0.2s ease;
-    }
-
-    .popup-photo:hover {
-      transform: scale(1.02);
-    }
-
-    /* Force Leaflet à ajuster la boîte à l'image */
-    .leaflet-popup-content {
-      margin: 12px 14px;
-      line-height: 1.4;
-    }
-
-    #lightbox {
-      display: none;
-      position: fixed;
-      z-index: 2000;
-      top: 0;
-      left: 0;
-      width: 100%;
-      height: 100%;
-      background-color: rgba(0, 0, 0, 0.9);
-      justify-content: center;
-      align-items: center;
-      cursor: pointer;
-    }
-    #lightbox img {
-      max-width: 90%;
-      max-height: 90%;
-      border-radius: 8px;
+    body { margin: 0; padding: 0; font-family: Arial, sans-serif; }
+    #map { height: 100vh; width: 100vw; }
+    #stats {
+      position: absolute; top: 10px; right: 10px; z-index: 1000;
+      background: rgba(255,255,255,0.9); padding: 10px 15px;
+      border-radius: 8px; box-shadow: 0 2px 6px rgba(0,0,0,0.3);
     }
   </style>
 </head>
 <body>
 
-  <!-- Panneau des statistiques -->
-  <div class="stats-panel">
-    <div class="stat-item">
-      <span class="stat-title">Vitesse</span>
-      <span id="speedVal" class="stat-value">0.0 km/h</span>
-    </div>
-    <div class="stat-item">
-      <span class="stat-title">V.Moyenne</span>
-      <span id="avgSpeedVal" class="stat-value">0.0 km/h</span>
-    </div>
-    <div class="stat-item">
-      <span class="stat-title">Distance</span>
-      <span id="distVal" class="stat-value">0.0 km</span>
-    </div>
-    <div class="stat-item">
-      <span class="stat-title">D+ Total</span>
-      <span id="eleVal" class="stat-value elevation">0 m</span>
-    </div>
+  <div id="stats">
+    <div><b>Vitesse :</b> <span id="speed">0.0</span> km/h</div>
+    <div><b>Distance :</b> <span id="distance">0.00</span> km</div>
+    <div><b>D+ Total :</b> <span id="elevation">0</span> m</div>
   </div>
-
   <div id="map"></div>
 
-  <!-- Lightbox pour afficher la photo en grand -->
-  <div id="lightbox" onclick="closeLightbox()">
-    <img id="lightboxImg" src="" alt="Photo agrandie" />
-  </div>
-
-  <!-- Leaflet JS -->
-  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-  <!-- Firebase App & Database (SDK Compat v9/v8) -->
-  <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-app-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-database-compat.js"></script>
-
   <script>
-    // 1. Configuration Firebase
+    // ⚠️ METS TES PROPRES CLÉS FIREBASE ICI (trouvables dans ta console Firebase)
     const firebaseConfig = {
-      databaseURL: "https://suivisortievelo-default-rtdb.europe-west1.firebasedatabase.app"
+      apiKey: "TON_API_KEY",
+      authDomain: "TON_PROJECT.firebaseapp.com",
+      databaseURL: "https://TON_PROJECT-default-rtdb.firebaseio.com",
+      projectId: "TON_PROJECT",
+      storageBucket: "TON_PROJECT.appspot.com",
+      messagingSenderId: "123456789",
+      appId: "TON_APP_ID"
     };
     firebase.initializeApp(firebaseConfig);
-    const database = firebase.database();
+    const db = firebase.database();
 
-    // 2. Extraction du Session ID depuis l'URL
+    // Récupération ID session dans l'URL (?session=XXXXX)
     const urlParams = new URLSearchParams(window.location.search);
     const sessionId = urlParams.get('session');
 
-    // 3. Carte Leaflet
+    // Carte Leaflet
     const map = L.map('map').setView([48.8566, 2.3522], 13);
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      attribution: '© OpenStreetMap'
-    }).addTo(map);
+    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
 
-    let polyline = L.polyline([], {color: '#00a8ff', weight: 5, opacity: 0.8}).addTo(map);
+    let routePolyline = L.polyline([], {color: 'blue', weight: 5}).addTo(map);
     let bikeMarker = null;
-    let displayedMessageKeys = new Set();
-
-    const bikeIcon = L.icon({
-      iconUrl: 'https://cdn-icons-png.flaticon.com/512/2972/2972185.png',
-      iconSize: [35, 35],
-      iconAnchor: [17, 17]
-    });
-
-    const photoIcon = L.icon({
-      iconUrl: 'https://cdn-icons-png.flaticon.com/512/684/684908.png',
-      iconSize: [30, 30],
-      iconAnchor: [15, 15]
-    });
-
-    function openLightbox(src) {
-      document.getElementById('lightboxImg').src = src;
-      document.getElementById('lightbox').style.display = 'flex';
-    }
-
-    function closeLightbox() {
-      document.getElementById('lightbox').style.display = 'none';
-    }
 
     if (sessionId) {
-
-      // --- A. ÉCOUTE DE LA POSITION LIVE & DE TOUTES LES STATS ---
-      database.ref(`sessions/${sessionId}/live`).on('value', (snapshot) => {
+      // 1. Écoute du tracé GPS
+      db.ref("sessions/" + sessionId + "/points").on("child_added", (snapshot) => {
         const data = snapshot.val();
-        if (!data) return;
-
-        const currentLatLng = [data.latitude, data.longitude];
-
-        // Mise à jour de l'UI
-        document.getElementById('speedVal').innerText = (data.speed || 0).toFixed(1) + ' km/h';
-        document.getElementById('avgSpeedVal').innerText = (data.avg_speed || 0).toFixed(1) + ' km/h';
-        document.getElementById('distVal').innerText = (data.distance || 0).toFixed(2) + ' km';
-        document.getElementById('eleVal').innerText = Math.round(data.d_plus || 0) + ' m';
-
-        // Positionnement du vélo
-        if (!bikeMarker) {
-          bikeMarker = L.marker(currentLatLng, {icon: bikeIcon}).addTo(map);
-          map.setView(currentLatLng, 15);
-        } else {
-          bikeMarker.setLatLng(currentLatLng);
-          map.panTo(currentLatLng);
-        }
-      });
-
-      // --- B. ÉCOUTE DU TRACÉ COMPLET (Route) ---
-      database.ref(`sessions/${sessionId}/route`).on('value', (snapshot) => {
-        const data = snapshot.val();
-        if (!data) return;
-
-        const routePoints = Object.values(data).map(pt => [pt.lat, pt.lng]);
-        polyline.setLatLngs(routePoints);
-      });
-
-      // --- C. ÉCOUTE DES COMMENTAIRES ET PHOTOS EN DIRECT ---
-      database.ref(`sessions/${sessionId}/messages`).on('child_added', (snapshot) => {
-        const key = snapshot.key;
-        if (displayedMessageKeys.has(key)) return;
-        displayedMessageKeys.add(key);
-
-        const msg = snapshot.val();
-        if (!msg || !msg.latitude || !msg.longitude) return;
-
-        let popupContent = `<div style="text-align:center; max-width:220px;">`;
+        const latLng = [data.lat, data.lng];
         
-        // Affichage de la photo si transmise en Base64
-        if (msg.imageBase64) {
-          const imgSrc = `data:image/jpeg;base64,${msg.imageBase64}`;
-          popupContent += `
-            <img src="${imgSrc}" class="popup-photo" onclick="openLightbox('${imgSrc}')" title="Cliquer pour agrandir"/>
-            <small style="color: #007bff; display: block; margin-bottom: 5px; cursor: pointer;" onclick="openLightbox('${imgSrc}')">🔍 Agrandir</small>
-          `;
-        }
+        routePolyline.addLatLng(latLng);
 
-        if (msg.text) {
-          popupContent += `<p style="margin:5px 0; font-weight:bold; color:#333;">${msg.text}</p>`;
+        if (!bikeMarker) {
+          bikeMarker = L.marker(latLng).addTo(map);
+        } else {
+          bikeMarker.setLatLng(latLng);
         }
-        popupContent += `</div>`;
-
-        L.marker([msg.latitude, msg.longitude], {icon: photoIcon})
-          .addTo(map)
-          .bindPopup(popupContent);
+        map.panTo(latLng);
       });
 
+      // 2. Écoute des Stats globales
+      db.ref("sessions/" + sessionId + "/info").on("value", (snapshot) => {
+        const data = snapshot.val();
+        if (data) {
+          document.getElementById("speed").innerText = (data.currentSpeed || 0).toFixed(1);
+          document.getElementById("distance").innerText = ((data.totalDistance || 0) / 1000).toFixed(2);
+          document.getElementById("elevation").innerText = (data.elevationGain || 0).toFixed(0);
+        }
+      });
+
+      // 3. Écoute des Photos et Commentaires
+      db.ref("sessions/" + sessionId + "/messages").on("child_added", (snapshot) => {
+        const data = snapshot.val();
+        let content = "";
+        if (data.image) content += `<img src="data:image/jpeg;base64,${data.image}" style="max-width:200px; display:block; margin-bottom:5px;"/>`;
+        if (data.text) content += `<div>${data.text}</div>`;
+
+        if (content) {
+          L.marker([data.lat, data.lng]).addTo(map).bindPopup(content);
+        }
+      });
     } else {
-      alert("Aucune session trouvée dans l'URL. Veuillez utiliser le lien généré par l'application mobile.");
+      alert("Aucune session spécifiée dans l'URL !");
     }
   </script>
 </body>
