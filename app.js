@@ -194,13 +194,15 @@ function fetchPointsFromFirebase() {
         .catch(err => debugLog("Erreur Réseau Spectateur: " + err.message));
 }
 
-function updateStatsDisplay(distanceKm, avgSpeedKmH, elevationMeters) {
+function updateStatsDisplay(distanceKm, avgSpeedKmH, elevationMeters, currentSpeedKmH = 0) {
     const elDist = document.getElementById('statDistance');
-    const elSpeed = document.getElementById('statAvgSpeed');
+    const elAvgSpeed = document.getElementById('statAvgSpeed');
+    const elCurrSpeed = document.getElementById('statCurrentSpeed');
     const elEle = document.getElementById('statElevation');
 
-    if (elDist) elDist.innerText = distanceKm.toFixed(1);
-    if (elSpeed) elSpeed.innerText = avgSpeedKmH.toFixed(1);
+    if (elDist) elDist.innerText = distanceKm.toFixed(2);
+    if (elAvgSpeed) elAvgSpeed.innerText = avgSpeedKmH.toFixed(1);
+    if (elCurrSpeed) elCurrSpeed.innerText = Number(currentSpeedKmH).toFixed(1);
     if (elEle) elEle.innerText = Math.round(elevationMeters);
 }
 
