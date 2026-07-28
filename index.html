@@ -104,12 +104,28 @@
       db.ref("livetrack/sessions/" + sessionId + "/pts").on("child_added", (s) => handlePoint(s.val()));
       db.ref("sessions/" + sessionId + "/points").on("child_added", (s) => handlePoint(s.val()));
 
-      // Écoute des Stats
+     
+      // Écoute des Stats (mise à jour)
       function handleInfo(data) {
         if (data) {
-          if (data.currentSpeed !== undefined) document.getElementById("statAvgSpeed").innerText = Number(data.currentSpeed).toFixed(1);
-          if (data.totalDistance !== undefined) document.getElementById("statDistance").innerText = (Number(data.totalDistance) / 1000).toFixed(2);
-          if (data.elevationGain !== undefined) document.getElementById("statElevation").innerText = Math.round(data.elevationGain);
+          // Vitesse instantanée
+          if (data.currentSpeed !== undefined) {
+            document.getElementById("statCurrentSpeed").innerText = Number(data.currentSpeed).toFixed(1);
+          }
+          
+          // Vitesse moyenne (renvoyée par l'app mobile via averageSpeed ou calc/average)
+          const avgSpeed = data.averageSpeed !== undefined ? data.averageSpeed : data.avgSpeed;
+          if (avgSpeed !== undefined) {
+            document.getElementById("statAvgSpeed").innerText = Number(avgSpeed).toFixed(1);
+          }
+      
+          // Distance & Dédivelé
+          if (data.totalDistance !== undefined) {
+            document.getElementById("statDistance").innerText = (Number(data.totalDistance) / 1000).toFixed(2);
+          }
+          if (data.elevationGain !== undefined) {
+            document.getElementById("statElevation").innerText = Math.round(data.elevationGain);
+          }
         }
       }
       db.ref("livetrack/sessions/" + sessionId + "/info").on("value", (s) => handleInfo(s.val()));
