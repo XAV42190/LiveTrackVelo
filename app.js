@@ -136,6 +136,11 @@ function fetchPointsFromFirebase() {
             let totalElevationGain = 0;
             let lastValidPt = null;
 
+            // --- NOUVEAU : Variables pour le lissage de l'altitude ---
+            const bufferSize = 5;
+            const altitudeBuffer = [];
+            let lastSmoothedAltitude = null;
+
             rawPoints.forEach(p => {
                 if (p.accuracy && p.accuracy > 50) return; 
 
@@ -148,13 +153,27 @@ function fetchPointsFromFirebase() {
 
                     totalDistanceMeters += distStep;
 
-                    const prevAlt = lastValidPt.alt !== undefined ? lastValidPt.alt : lastValidPt.altitude;
-                    const currAlt = p.alt !== undefined ? p.alt : p.altitude;
+                    // --- NOUVEAU : Calcul lissé du D+ ---
+                    const rawAlt = p.alt !== undefined ? p.alt : p.altitude;
+                    if (rawAlt !== undefined && rawAlt !== null) {
+                        // 1. Ajouter l'altitude brute dans le tampon (buffer)
+                        altitudeBuffer.push(Number(rawAlt));
+                        if (altitudeBuffer.length > bufferSize) {
+                            altitudeBuffer.shift();
+                        }
 
-                    if (prevAlt !== undefined && currAlt !== undefined) {
-                        const eleDiff = currAlt - prevAlt;
-                        if (eleDiff > 2) {
-                            totalElevationGain += eleDiff;
+                        // 2. Calculer l'altitude moyenne lissée
+                        const currentSmoothedAlt = altitudeBuffer.reduce((a, b) => a + b, 0) / altitudeBuffer.length;
+
+                        // 3. Accumuler le dénivelé si la montée lissée est > 0.4m
+                        if (lastSmoothedAltitude !== null) {
+                            const diff = currentSmoothedAlt - lastSmoothedAltitude;
+                            if (diff > 0.4) {
+                                totalElevationGain += diff;
+                                lastSmoothedAltitude = currentSmoothedAlt;
+                            }
+                        } else {
+                            lastSmoothedAltitude = currentSmoothedAlt;
                         }
                     }
                 }
