@@ -136,45 +136,52 @@ function fetchPointsFromFirebase() {
             let totalElevationGain = 0;
             let lastValidPt = null;
 
-            // --- NOUVEAU : Variables pour le lissage de l'altitude ---
+            // Variables de lissage de dénivelé
             const bufferSize = 5;
             const altitudeBuffer = [];
-            let lastSmoothedAltitude = null;
+            let lastSmoothedAlt = null;
 
             rawPoints.forEach(p => {
                 if (p.accuracy && p.accuracy > 50) return; 
 
+                // --- 1. CALCUL DU DÉNIVELÉ (exécuté sur TOUS les points) ---
+                const rawAlt = p.alt !== undefined ? p.alt : (p.altitude !== undefined ? p.altitude : (p.ele !== undefined ? p.ele : null));
+                
+                if (rawAlt !== null && rawAlt !== undefined) {
+                    const numAlt = Number(rawAlt);
+                    if (!isNaN(numAlt)) {
+                        altitudeBuffer.push(numAlt);
+                        if (altitudeBuffer.length > bufferSize) {
+                            altitudeBuffer.shift();
+                        }
+
+                        // Altitude lissée (moyenne glissante)
+                        const currentSmoothedAlt = altitudeBuffer.reduce((a, b) => a + b, 0) / altitudeBuffer.length;
+
+                        if (lastSmoothedAlt !== null) {
+                            const diff = currentSmoothedAlt - lastSmoothedAlt;
+                            // Accumule les montées dès 0.2m pour ne rien rater
+                            if (diff > 0.2) {
+                                totalElevationGain += diff;
+                                lastSmoothedAlt = currentSmoothedAlt;
+                            } else if (diff < -0.2) {
+                                // En descente, on met à jour la référence d'altitude pour la prochaine montée
+                                lastSmoothedAlt = currentSmoothedAlt;
+                            }
+                        } else {
+                            lastSmoothedAlt = currentSmoothedAlt;
+                        }
+                    }
+                }
+
+                // --- 2. CALCUL DE LA DISTANCE ---
                 if (lastValidPt) {
                     const prevLatLng = L.latLng(lastValidPt.lat, lastValidPt.lng);
                     const currLatLng = L.latLng(p.lat, p.lng);
                     const distStep = prevLatLng.distanceTo(currLatLng);
 
-                    if (distStep > 500) return;
-
-                    totalDistanceMeters += distStep;
-
-                    // --- NOUVEAU : Calcul lissé du D+ ---
-                    const rawAlt = p.alt !== undefined ? p.alt : p.altitude;
-                    if (rawAlt !== undefined && rawAlt !== null) {
-                        // 1. Ajouter l'altitude brute dans le tampon (buffer)
-                        altitudeBuffer.push(Number(rawAlt));
-                        if (altitudeBuffer.length > bufferSize) {
-                            altitudeBuffer.shift();
-                        }
-
-                        // 2. Calculer l'altitude moyenne lissée
-                        const currentSmoothedAlt = altitudeBuffer.reduce((a, b) => a + b, 0) / altitudeBuffer.length;
-
-                        // 3. Accumuler le dénivelé si la montée lissée est > 0.4m
-                        if (lastSmoothedAltitude !== null) {
-                            const diff = currentSmoothedAlt - lastSmoothedAltitude;
-                            if (diff > 0.4) {
-                                totalElevationGain += diff;
-                                lastSmoothedAltitude = currentSmoothedAlt;
-                            }
-                        } else {
-                            lastSmoothedAltitude = currentSmoothedAlt;
-                        }
+                    if (distStep <= 500) {
+                        totalDistanceMeters += distStep;
                     }
                 }
 
@@ -208,7 +215,7 @@ function fetchPointsFromFirebase() {
             }
 
             updateStatsDisplay(totalDistanceMeters / 1000, avgSpeed, totalElevationGain);
-            debugLog("SPECTATEUR : " + coords.length + " points affichés !");
+            debugLog("SPECTATEUR : " + coords.length + " pts | D+: " + Math.round(totalElevationGain) + "m");
         })
         .catch(err => debugLog("Erreur Réseau Spectateur: " + err.message));
 }
@@ -243,7 +250,7 @@ function fetchCommentsFromFirebase() {
         .catch(err => console.log("Erreur commentaires: ", err));
 }
 
-// --- NOUVEAU : RECUPERATION DU NŒUD INFO (Envoyé par l'app Mobile Android Flutter) ---
+// --- RECUPERATION DU NŒUD INFO (Envoyé par l'app Mobile Android Flutter) ---
 function fetchSessionInfoFromFirebase() {
     const url = `${FIREBASE_DB_URL}/livetrack/sessions/${activeSessionId}/info.json`;
 
@@ -256,7 +263,6 @@ function fetchSessionInfoFromFirebase() {
             const photoRaw = data.photoBase64 || null;
             const photo = photoRaw ? (photoRaw.startsWith('data:') ? photoRaw : 'data:image/jpeg;base64,' + photoRaw) : null;
             
-            // On utilise les coordonnées envoyées, ou la dernière position du parcours
             let lat = data.lat;
             let lng = data.lng;
 
