@@ -25,6 +25,7 @@
       font-size: 13px; color: #1e293b;
     }
     #stats span { font-weight: bold; color: #2563eb; }
+    #statGroup { color: #059669 !important; } /* Vert pour le groupe */
 
     #imageModal {
       display: none; position: fixed; z-index: 9999;
@@ -33,11 +34,32 @@
       justify-content: center; align-items: center;
     }
     #imageModal img { max-width: 90%; max-height: 90%; border-radius: 8px; }
+
+    /* Style du badge Groupe au-dessus du vélo */
+    .bike-container {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+    }
+    .bike-label {
+      background-color: #2563eb;
+      color: white;
+      font-size: 11px;
+      font-weight: bold;
+      padding: 2px 6px;
+      border-radius: 10px;
+      white-space: nowrap;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+      border: 1px solid white;
+      margin-bottom: 2px;
+    }
   </style>
 </head>
 <body>
 
   <div id="stats">
+    <div>👥 <b>Groupe :</b> <span id="statGroup">En attente...</span></div>
     <div>⚡ <b>Vitesse :</b> <span id="statCurrentSpeed">0.0</span> km/h</div>
     <div>🚴🏼‍♂️ <b>V. Moyenne :</b> <span id="statAvgSpeed">0.0</span> km/h</div>
     <div>📏 <b>Distance :</b> <span id="statDistance">0.00</span> km</div>
@@ -73,10 +95,24 @@
 
     let polyline = L.polyline([], { color: '#2563eb', weight: 5, opacity: 0.9 }).addTo(map);
     let bikeMarker = null;
+    let currentGroupName = "Vélo"; // Nom par défaut
 
     let totalWebElevationGain = 0;
     let lastValidAltitude = null;
     const processedPoints = new Set();
+
+    // Fonction pour créer/mettre à jour l'icône du vélo avec le nom du groupe
+    function createBikeIcon(name) {
+      return L.divIcon({
+        className: 'custom-bike-icon',
+        html: `<div class="bike-container">
+                <div class="bike-label">${name}</div>
+                <div style="font-size: 24px; line-height: 1;">🚴🏼‍♂️</div>
+               </div>`,
+        iconSize: [100, 45],
+        iconAnchor: [50, 40]
+      });
+    }
 
     if (!sessionId) {
       alert("⚠️ Pas de paramètre ?session=XXXX dans l'URL !");
@@ -85,7 +121,6 @@
       function handlePoint(data) {
         if (!data || data.lat === undefined || data.lng === undefined) return;
 
-        // Déduplication physique : latitude, longitude et altitude (arrondies à 5 décimales)
         const currentAlt = data.alt !== undefined ? data.alt : (data.elevation !== undefined ? data.elevation : data.altitude);
         const geoFingerprint = `${data.lat.toFixed(5)}_${data.lng.toFixed(5)}_${currentAlt ? Number(currentAlt).toFixed(1) : '0'}`;
 
@@ -96,13 +131,7 @@
         polyline.addLatLng(latLng);
 
         if (!bikeMarker) {
-          const bikeIcon = L.divIcon({
-            className: 'custom-bike-icon',
-            html: '<div style="font-size: 26px;">🚴🏼‍♂️</div>',
-            iconSize: [30, 30],
-            iconAnchor: [15, 15]
-          });
-          bikeMarker = L.marker(latLng, { icon: bikeIcon }).addTo(map);
+          bikeMarker = L.marker(latLng, { icon: createBikeIcon(currentGroupName) }).addTo(map);
           map.setView(latLng, 15);
         } else {
           bikeMarker.setLatLng(latLng);
@@ -129,7 +158,7 @@
         }
       }
 
-      // Écoute intelligente : on s'abonne au 1er nœud, et si rien n'arrive, on tente le 2nd
+      // Écoute des points GPS
       const primaryRef = db.ref("livetrack/sessions/" + sessionId + "/pts");
       const fallbackRef = db.ref("sessions/" + sessionId + "/points");
 
@@ -141,9 +170,22 @@
         }
       });
 
-      // Stats
+      // Stats & Informations de session (incluant le Nom du Groupe)
       function handleInfo(data) {
         if (!data) return;
+
+        // Récupération du nom du groupe
+        const group = data.groupName || data.group || data.nomGroupe;
+        if (group && group !== currentGroupName) {
+          currentGroupName = group;
+          document.getElementById("statGroup").innerText = currentGroupName;
+          
+          // Mise à jour de l'étiquette sur le marqueur du vélo s'il existe déjà
+          if (bikeMarker) {
+            bikeMarker.setIcon(createBikeIcon(currentGroupName));
+          }
+        }
+
         if (data.currentSpeed !== undefined) {
           document.getElementById("statCurrentSpeed").innerText = Number(data.currentSpeed).toFixed(1);
         }
