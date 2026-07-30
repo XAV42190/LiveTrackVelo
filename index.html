@@ -74,28 +74,27 @@
     let polyline = L.polyline([], { color: '#2563eb', weight: 5, opacity: 0.9 }).addTo(map);
     let bikeMarker = null;
 
-    // Variables pour le calcul local du D+
     let totalWebElevationGain = 0;
     let lastValidAltitude = null;
-    const processedPointIds = new Set();
+    const processedPoints = new Set();
 
     if (!sessionId) {
       alert("⚠️ Pas de paramètre ?session=XXXX dans l'URL !");
     } else {
 
-      // Traitement centralisé des points GPS
-      function handlePoint(data, key) {
+      function handlePoint(data) {
         if (!data || data.lat === undefined || data.lng === undefined) return;
 
-        // 1. Déduplication stricte via la clé Firebase ou les coordonnées/timestamp
-        const pointId = key || (data.timestamp ? data.timestamp : `${data.lat}_${data.lng}`);
-        if (processedPointIds.has(pointId)) return;
-        processedPointIds.add(pointId);
+        // Déduplication physique : latitude, longitude et altitude (arrondies à 5 décimales)
+        const currentAlt = data.alt !== undefined ? data.alt : (data.elevation !== undefined ? data.elevation : data.altitude);
+        const geoFingerprint = `${data.lat.toFixed(5)}_${data.lng.toFixed(5)}_${currentAlt ? Number(currentAlt).toFixed(1) : '0'}`;
+
+        if (processedPoints.has(geoFingerprint)) return;
+        processedPoints.add(geoFingerprint);
 
         const latLng = [data.lat, data.lng];
         polyline.addLatLng(latLng);
 
-        // Marker Velo
         if (!bikeMarker) {
           const bikeIcon = L.divIcon({
             className: 'custom-bike-icon',
@@ -110,16 +109,12 @@
           map.panTo(latLng);
         }
 
-        // --- CALCUL DYNAMIQUE DU D+ ---
-        const currentAlt = data.alt !== undefined ? data.alt : (data.elevation !== undefined ? data.elevation : data.altitude);
-        
+        // CALCUL DU D+ LOCAL
         if (currentAlt !== undefined && currentAlt !== null) {
           const alt = Number(currentAlt);
           if (!isNaN(alt)) {
             if (lastValidAltitude !== null) {
               const diff = alt - lastValidAltitude;
-              
-              // Seuil de 2.0m pour filtrer le bruit GPS
               if (diff >= 2.0) {
                 totalWebElevationGain += diff;
                 lastValidAltitude = alt;
@@ -134,39 +129,38 @@
         }
       }
 
-      // Écoute UNIQUE sur les 2 nœuds possibles avec transmission de la clé Firebase (s.key)
-      db.ref("livetrack/sessions/" + sessionId + "/pts").on("child_added", (s) => handlePoint(s.val(), s.key));
-      db.ref("sessions/" + sessionId + "/points").on("child_added", (s) => handlePoint(s.val(), s.key));
+      // Écoute intelligente : on s'abonne au 1er nœud, et si rien n'arrive, on tente le 2nd
+      const primaryRef = db.ref("livetrack/sessions/" + sessionId + "/pts");
+      const fallbackRef = db.ref("sessions/" + sessionId + "/points");
 
-      // Écoute des Stats générales
+      primaryRef.once("value", (snapshot) => {
+        if (snapshot.exists()) {
+          primaryRef.on("child_added", (s) => handlePoint(s.val()));
+        } else {
+          fallbackRef.on("child_added", (s) => handlePoint(s.val()));
+        }
+      });
+
+      // Stats
       function handleInfo(data) {
-        if (data) {
-          if (data.currentSpeed !== undefined) {
-            document.getElementById("statCurrentSpeed").innerText = Number(data.currentSpeed).toFixed(1);
-          }
-          
-          const avgSpeed = data.averageSpeed !== undefined ? data.averageSpeed : data.avgSpeed;
-          if (avgSpeed !== undefined) {
-            document.getElementById("statAvgSpeed").innerText = Number(avgSpeed).toFixed(1);
-          }
-      
-          if (data.totalDistance !== undefined) {
-            document.getElementById("statDistance").innerText = (Number(data.totalDistance) / 1000).toFixed(2);
-          }
-
-          // Fallback D+ uniquement si aucun calcul local n'a été effectué
-          if (totalWebElevationGain === 0 && data.elevationGain !== undefined) {
-            document.getElementById("statElevation").innerText = Math.round(data.elevationGain);
-          }
+        if (!data) return;
+        if (data.currentSpeed !== undefined) {
+          document.getElementById("statCurrentSpeed").innerText = Number(data.currentSpeed).toFixed(1);
+        }
+        const avgSpeed = data.averageSpeed !== undefined ? data.averageSpeed : data.avgSpeed;
+        if (avgSpeed !== undefined) {
+          document.getElementById("statAvgSpeed").innerText = Number(avgSpeed).toFixed(1);
+        }
+        if (data.totalDistance !== undefined) {
+          document.getElementById("statDistance").innerText = (Number(data.totalDistance) / 1000).toFixed(2);
         }
       }
       db.ref("livetrack/sessions/" + sessionId + "/info").on("value", (s) => handleInfo(s.val()));
       db.ref("sessions/" + sessionId + "/info").on("value", (s) => handleInfo(s.val()));
 
-      // Écoute des Photos et Commentaires
+      // Photos & Messages
       function handleMessage(item) {
         if (!item || item.lat === undefined || item.lng === undefined) return;
-
         const hasPhoto = Boolean(item.image || item.photo);
         const text = item.text || item.note || '';
         const badge = hasPhoto ? '📸 ' : '💬 ';
@@ -184,13 +178,11 @@
 
         let popupContent = `<div style="text-align:center; min-width: 120px;">`;
         if (text) popupContent += `<b>${text}</b><br>`;
-        
         const photoSrc = item.image ? (item.image.startsWith('data:') ? item.image : 'data:image/jpeg;base64,' + item.image) : item.photo;
         if (photoSrc) {
           popupContent += `<img src="${photoSrc}" onclick="openImageModal('${photoSrc}')" style="max-width:180px; max-height:180px; border-radius:6px; margin-top:6px; cursor:pointer;" />`;
         }
         popupContent += `</div>`;
-
         marker.bindPopup(popupContent);
       }
 
