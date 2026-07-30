@@ -37,7 +37,7 @@
 </head>
 <body>
 
-   <div id="stats">
+  <div id="stats">
     <div>⚡ <b>Vitesse :</b> <span id="statCurrentSpeed">0.0</span> km/h</div>
     <div>🚴🏼‍♂️ <b>V. Moyenne :</b> <span id="statAvgSpeed">0.0</span> km/h</div>
     <div>📏 <b>Distance :</b> <span id="statDistance">0.00</span> km</div>
@@ -74,6 +74,10 @@
     let polyline = L.polyline([], { color: '#2563eb', weight: 5, opacity: 0.9 }).addTo(map);
     let bikeMarker = null;
 
+    // Variables pour le calcul local du D+
+    let totalWebElevationGain = 0;
+    let lastValidAltitude = null;
+
     if (!sessionId) {
       alert("⚠️ Pas de paramètre ?session=XXXX dans l'URL !");
     } else {
@@ -84,6 +88,7 @@
           const latLng = [data.lat, data.lng];
           polyline.addLatLng(latLng);
 
+          // Marker Velo
           if (!bikeMarker) {
             const bikeIcon = L.divIcon({
               className: 'custom-bike-icon',
@@ -97,6 +102,29 @@
             bikeMarker.setLatLng(latLng);
             map.panTo(latLng);
           }
+
+          // --- CALCUL DYNAMIQUE DU D+ DANS LE NAVIGATEUR ---
+          const currentAlt = data.alt !== undefined ? data.alt : (data.elevation !== undefined ? data.elevation : data.altitude);
+          
+          if (currentAlt !== undefined && currentAlt !== null) {
+            const alt = Number(currentAlt);
+            if (!isNaN(alt)) {
+              if (lastValidAltitude !== null) {
+                const diff = alt - lastValidAltitude;
+                // Seuil de 1.5m pour ignorer le bruit tout en cumulant les vraies côtes
+                if (diff > 1.5) {
+                  totalWebElevationGain += diff;
+                  lastValidAltitude = alt;
+                  document.getElementById("statElevation").innerText = Math.round(totalWebElevationGain);
+                } else if (diff < -1.5) {
+                  // Met à jour la référence d'altitude en descente
+                  lastValidAltitude = alt;
+                }
+              } else {
+                lastValidAltitude = alt;
+              }
+            }
+          }
         }
       }
 
@@ -104,26 +132,24 @@
       db.ref("livetrack/sessions/" + sessionId + "/pts").on("child_added", (s) => handlePoint(s.val()));
       db.ref("sessions/" + sessionId + "/points").on("child_added", (s) => handlePoint(s.val()));
 
-     
-      // Écoute des Stats (mise à jour)
+      // Écoute des Stats générales
       function handleInfo(data) {
         if (data) {
-          // Vitesse instantanée
           if (data.currentSpeed !== undefined) {
             document.getElementById("statCurrentSpeed").innerText = Number(data.currentSpeed).toFixed(1);
           }
           
-          // Vitesse moyenne (renvoyée par l'app mobile via averageSpeed ou calc/average)
           const avgSpeed = data.averageSpeed !== undefined ? data.averageSpeed : data.avgSpeed;
           if (avgSpeed !== undefined) {
             document.getElementById("statAvgSpeed").innerText = Number(avgSpeed).toFixed(1);
           }
       
-          // Distance & Dédivelé
           if (data.totalDistance !== undefined) {
             document.getElementById("statDistance").innerText = (Number(data.totalDistance) / 1000).toFixed(2);
           }
-          if (data.elevationGain !== undefined) {
+
+          // Fallback D+ uniquement si aucun point d'altitude n'a été calculé côté web
+          if (totalWebElevationGain === 0 && data.elevationGain !== undefined) {
             document.getElementById("statElevation").innerText = Math.round(data.elevationGain);
           }
         }
