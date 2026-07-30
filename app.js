@@ -4,6 +4,7 @@
 const FIREBASE_DB_URL = "https://suivisortievelo-default-rtdb.europe-west1.firebasedatabase.app"; 
 
 let map, marker, polyline;
+let spectatorMarker = null; // Marqueur pour la position du spectateur
 let watchId = null;
 let viewerInterval = null;
 let commentsInterval = null;
@@ -34,6 +35,9 @@ window.addEventListener('DOMContentLoaded', () => {
     if (isViewer) {
         const controls = document.querySelector('.controls');
         if (controls) controls.style.display = 'none';
+        
+        // Ajout du bouton de géolocalisation pour le spectateur
+        createSpectatorButton();
     }
 
     map = L.map('map').setView([46.603354, 1.888334], 6);
@@ -64,6 +68,73 @@ window.addEventListener('DOMContentLoaded', () => {
 
     setupEventListeners();
 });
+
+// Crée et injecte le bouton "Ma position" pour le spectateur s'il n'existe pas dans le HTML
+function createSpectatorButton() {
+    if (document.getElementById('spectatorLocBtn')) return;
+
+    const btn = document.createElement('button');
+    btn.id = 'spectatorLocBtn';
+    btn.innerHTML = '📍 Ma position';
+    btn.style.cssText = `
+        position: fixed;
+        bottom: 20px;
+        right: 12px;
+        z-index: 1000;
+        background: #ffffff;
+        color: #1e293b;
+        border: 2px solid #cbd5e1;
+        padding: 10px 14px;
+        border-radius: 24px;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.25);
+        font-size: 13px;
+        font-weight: bold;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+    `;
+    btn.onclick = toggleSpectatorLocation;
+    document.body.appendChild(btn);
+}
+
+// Fonction pour géolocaliser le spectateur et marquer sa position
+function toggleSpectatorLocation() {
+    if (!navigator.geolocation) {
+        alert("⚠️ La géolocalisation n'est pas supportée par votre navigateur.");
+        return;
+    }
+
+    navigator.geolocation.getCurrentPosition(
+        (position) => {
+            const lat = position.coords.latitude;
+            const lng = position.coords.longitude;
+            const latLng = [lat, lng];
+
+            const spectatorIcon = L.divIcon({
+                className: 'custom-spectator-icon',
+                html: `<div style="background-color: #10b981; color: white; padding: 4px 8px; border-radius: 12px; font-weight: bold; font-size: 11px; border: 2px solid white; box-shadow: 0 2px 6px rgba(0,0,0,0.3); white-space: nowrap;">
+                        📍 Ma position
+                       </div>`,
+                iconSize: [90, 26],
+                iconAnchor: [45, 13]
+            });
+
+            if (!spectatorMarker) {
+                spectatorMarker = L.marker(latLng, { icon: spectatorIcon }).addTo(map);
+                spectatorMarker.bindPopup("<b>Vous êtes ici</b>");
+            } else {
+                spectatorMarker.setLatLng(latLng);
+            }
+
+            map.setView(latLng, 15);
+        },
+        (error) => {
+            alert("Impossible d'obtenir votre position GPS. Assurez-vous d'avoir autorisé la localisation dans votre navigateur.");
+        },
+        { enableHighAccuracy: true, timeout: 10000 }
+    );
+}
 
 // Affiche un petit badge de débogage ancré en haut à DROITE
 function debugLog(msg) {
@@ -136,7 +207,6 @@ function fetchPointsFromFirebase() {
             let totalElevationGain = 0;
             let lastValidPt = null;
 
-            // Variables de lissage de dénivelé
             const bufferSize = 5;
             const altitudeBuffer = [];
             let lastSmoothedAlt = null;
@@ -144,7 +214,6 @@ function fetchPointsFromFirebase() {
             rawPoints.forEach(p => {
                 if (p.accuracy && p.accuracy > 50) return; 
 
-                // --- 1. CALCUL DU DÉNIVELÉ (exécuté sur TOUS les points) ---
                 const rawAlt = p.alt !== undefined ? p.alt : (p.altitude !== undefined ? p.altitude : (p.ele !== undefined ? p.ele : null));
                 
                 if (rawAlt !== null && rawAlt !== undefined) {
@@ -155,17 +224,14 @@ function fetchPointsFromFirebase() {
                             altitudeBuffer.shift();
                         }
 
-                        // Altitude lissée (moyenne glissante)
                         const currentSmoothedAlt = altitudeBuffer.reduce((a, b) => a + b, 0) / altitudeBuffer.length;
 
                         if (lastSmoothedAlt !== null) {
                             const diff = currentSmoothedAlt - lastSmoothedAlt;
-                            // Accumule les montées dès 0.2m pour ne rien rater
                             if (diff > 0.2) {
                                 totalElevationGain += diff;
                                 lastSmoothedAlt = currentSmoothedAlt;
                             } else if (diff < -0.2) {
-                                // En descente, on met à jour la référence d'altitude pour la prochaine montée
                                 lastSmoothedAlt = currentSmoothedAlt;
                             }
                         } else {
@@ -174,7 +240,6 @@ function fetchPointsFromFirebase() {
                     }
                 }
 
-                // --- 2. CALCUL DE LA DISTANCE ---
                 if (lastValidPt) {
                     const prevLatLng = L.latLng(lastValidPt.lat, lastValidPt.lng);
                     const currLatLng = L.latLng(p.lat, p.lng);
@@ -199,7 +264,6 @@ function fetchPointsFromFirebase() {
                     map.setView(lastPoint, 16);
                 } else {
                     marker.setLatLng(lastPoint);
-                    map.panTo(lastPoint);
                 }
             }
 
@@ -487,7 +551,6 @@ function startTracking() {
                 map.setView([lat, lng], 16);
             } else {
                 marker.setLatLng([lat, lng]);
-                map.panTo([lat, lng]);
             }
 
             debugLog("CYCLISTE : " + localPath.length + " pts | Alt: " + Math.round(alt) + "m");
