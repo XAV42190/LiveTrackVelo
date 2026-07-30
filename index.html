@@ -83,50 +83,63 @@
     } else {
       
       // Traitement centralisé des points GPS
-      function handlePoint(data) {
-        if (data && data.lat !== undefined && data.lng !== undefined) {
-          const latLng = [data.lat, data.lng];
-          polyline.addLatLng(latLng);
+      // Set pour stocker les IDs des points déjà traités (évite le double comptage si 2 nœuds Firebase sont écoutés)
+const processedPointIds = new Set();
 
-          // Marker Velo
-          if (!bikeMarker) {
-            const bikeIcon = L.divIcon({
-              className: 'custom-bike-icon',
-              html: '<div style="font-size: 26px;">🚴🏼‍♂️</div>',
-              iconSize: [30, 30],
-              iconAnchor: [15, 15]
-            });
-            bikeMarker = L.marker(latLng, { icon: bikeIcon }).addTo(map);
-            map.setView(latLng, 15);
-          } else {
-            bikeMarker.setLatLng(latLng);
-            map.panTo(latLng);
-          }
+function handlePoint(data, key) {
+  if (!data || data.lat === undefined || data.lng === undefined) return;
 
-          // --- CALCUL DYNAMIQUE DU D+ DANS LE NAVIGATEUR ---
-          const currentAlt = data.alt !== undefined ? data.alt : (data.elevation !== undefined ? data.elevation : data.altitude);
-          
-          if (currentAlt !== undefined && currentAlt !== null) {
-            const alt = Number(currentAlt);
-            if (!isNaN(alt)) {
-              if (lastValidAltitude !== null) {
-                const diff = alt - lastValidAltitude;
-                // Seuil de 1.5m pour ignorer le bruit tout en cumulant les vraies côtes
-                if (diff > 1.5) {
-                  totalWebElevationGain += diff;
-                  lastValidAltitude = alt;
-                  document.getElementById("statElevation").innerText = Math.round(totalWebElevationGain);
-                } else if (diff < -1.5) {
-                  // Met à jour la référence d'altitude en descente
-                  lastValidAltitude = alt;
-                }
-              } else {
-                lastValidAltitude = alt;
-              }
-            }
-          }
+  // 1. Déduplication : si le point a déjà été traité via l'autre nœud Firebase, on l'ignore
+  const pointId = key || (data.timestamp ? data.timestamp : `${data.lat}_${data.lng}`);
+  if (processedPointIds.has(pointId)) return;
+  processedPointIds.add(pointId);
+
+  const latLng = [data.lat, data.lng];
+  polyline.addLatLng(latLng);
+
+  // Marker Velo
+  if (!bikeMarker) {
+    const bikeIcon = L.divIcon({
+      className: 'custom-bike-icon',
+      html: '<div style="font-size: 26px;">🚴🏼‍♂️</div>',
+      iconSize: [30, 30],
+      iconAnchor: [15, 15]
+    });
+    bikeMarker = L.marker(latLng, { icon: bikeIcon }).addTo(map);
+    map.setView(latLng, 15);
+  } else {
+    bikeMarker.setLatLng(latLng);
+    map.panTo(latLng);
+  }
+
+  // --- CALCUL DYNAMIQUE DU D+ (avec filtrage anti-bruit & déduplication) ---
+  const currentAlt = data.alt !== undefined ? data.alt : (data.elevation !== undefined ? data.elevation : data.altitude);
+  
+  if (currentAlt !== undefined && currentAlt !== null) {
+    const alt = Number(currentAlt);
+    if (!isNaN(alt)) {
+      if (lastValidAltitude !== null) {
+        const diff = alt - lastValidAltitude;
+        
+        // Seuil ajusté à 2.0 mètres pour gommer le bruit d'altitude GPS
+        if (diff >= 2.0) {
+          totalWebElevationGain += diff;
+          lastValidAltitude = alt;
+          document.getElementById("statElevation").innerText = Math.round(totalWebElevationGain);
+        } else if (diff <= -2.0) {
+          // Ajuste la référence en descente
+          lastValidAltitude = alt;
         }
+      } else {
+        lastValidAltitude = alt;
       }
+    }
+  }
+}
+
+// Mettre à jour l'écoute Firebase pour passer la clé unique du point 's.key'
+db.ref("livetrack/sessions/" + sessionId + "/pts").on("child_added", (s) => handlePoint(s.val(), s.key));
+db.ref("sessions/" + sessionId + "/points").on("child_added", (s) => handlePoint(s.val(), s.key));
 
       // Écoute sur les 2 formats de noeud possibles pour les points GPS
       db.ref("livetrack/sessions/" + sessionId + "/pts").on("child_added", (s) => handlePoint(s.val()));
