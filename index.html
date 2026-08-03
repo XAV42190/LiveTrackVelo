@@ -128,7 +128,7 @@
 
     let totalWebElevationGain = 0;
     let lastValidAltitude = null;
-    const processedPoints = new Set();
+    let isInitialLoadDone = false;
 
     function createBikeIcon(name) {
       return L.divIcon({
@@ -146,25 +146,23 @@
       alert("⚠️ Pas de paramètre ?session=XXXX dans l'URL !");
     } else {
 
-      function handlePoint(data) {
+      function processPoint(data) {
         if (!data || data.lat === undefined || data.lng === undefined) return;
-
-        const currentAlt = data.alt !== undefined ? data.alt : (data.elevation !== undefined ? data.elevation : data.altitude);
-        const geoFingerprint = `${data.lat.toFixed(5)}_${data.lng.toFixed(5)}_${currentAlt ? Number(currentAlt).toFixed(1) : '0'}`;
-
-        if (processedPoints.has(geoFingerprint)) return;
-        processedPoints.add(geoFingerprint);
 
         const latLng = [data.lat, data.lng];
         polyline.addLatLng(latLng);
 
         if (!bikeMarker) {
           bikeMarker = L.marker(latLng, { icon: createBikeIcon(currentGroupName) }).addTo(map);
-          map.setView(latLng, 15);
         } else {
           bikeMarker.setLatLng(latLng);
         }
 
+        // Toujours centrer sur le dernier point (Live)
+        map.setView(latLng, 15);
+
+        // Calcul dénivelé positif
+        const currentAlt = data.alt !== undefined ? data.alt : (data.elevation !== undefined ? data.elevation : data.altitude);
         if (currentAlt !== undefined && currentAlt !== null) {
           const alt = Number(currentAlt);
           if (!isNaN(alt)) {
@@ -184,14 +182,44 @@
         }
       }
 
-      const primaryRef = db.ref("livetrack/sessions/" + sessionId + "/pts");
-      const fallbackRef = db.ref("sessions/" + sessionId + "/points");
+      function loadAndListenSession(nodePath) {
+        const ref = db.ref(nodePath);
 
+        // 1. Récupérer d'abord l'intégralité des points existants
+        ref.once("value", (snapshot) => {
+          if (snapshot.exists()) {
+            const rawData = snapshot.val();
+            let ptsList = [];
+
+            if (typeof rawData === 'object') {
+              ptsList = Object.values(rawData).filter(p => p && p.lat !== undefined && p.lng !== undefined);
+            }
+
+            // Tri STRICT chronologique par timestamp
+            ptsList.sort((a, b) => (a.timestamp || a.t || 0) - (b.timestamp || b.t || 0));
+
+            // Réinitialiser le tracé et tout dessiner dans l'ordre
+            polyline.setLatLngs([]);
+            ptsList.forEach(p => processPoint(p));
+
+            isInitialLoadDone = true;
+
+            // 2. Écouter les nouveaux points envoyés en direct
+            ref.limitToLast(1).on("child_added", (s) => {
+              if (isInitialLoadDone) {
+                processPoint(s.val());
+              }
+            });
+          }
+        });
+      }
+
+      const primaryRef = db.ref("livetrack/sessions/" + sessionId + "/pts");
       primaryRef.once("value", (snapshot) => {
         if (snapshot.exists()) {
-          primaryRef.on("child_added", (s) => handlePoint(s.val()));
+          loadAndListenSession("livetrack/sessions/" + sessionId + "/pts");
         } else {
-          fallbackRef.on("child_added", (s) => handlePoint(s.val()));
+          loadAndListenSession("sessions/" + sessionId + "/points");
         }
       });
 
